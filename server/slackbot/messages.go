@@ -3,7 +3,6 @@ package slackbot
 import (
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"schej.it/server/models"
 	"schej.it/server/slackbot/commands"
 	"schej.it/server/utils"
@@ -53,10 +52,10 @@ func SendEventCreatedMessage(insertedId string, creator string, event models.Eve
 		}
 	}
 
-	response := commands.Response{Blocks: []bson.M{
+	response := commands.Response{Blocks: []map[string]interface{}{
 		{
 			"type": "header",
-			"text": bson.M{
+			"text": map[string]interface{}{
 				"type":  "plain_text",
 				"text":  ":tada: New event created! :tada:",
 				"emoji": true,
@@ -64,7 +63,7 @@ func SendEventCreatedMessage(insertedId string, creator string, event models.Eve
 		},
 		{
 			"type": "section",
-			"text": bson.M{
+			"text": map[string]interface{}{
 				"type": "mrkdwn",
 				"text": eventInfoText,
 			},

@@ -2,7 +2,6 @@
 package routes
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
 	"schej.it/server/db"
 	"schej.it/server/models"
 	"schej.it/server/slackbot"
@@ -284,8 +282,10 @@ func upgradeUser(c *gin.Context) {
 	}
 
 	stripeCustomerId := "premium"
-	user.StripeCustomerId = &stripeCustomerId
-	db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": user.Id}, bson.M{"$set": user})
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Update("stripe_customer_id", stripeCustomerId).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -311,7 +311,10 @@ func downgradeUser(c *gin.Context) {
 		return
 	}
 
-	db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": user.Id}, bson.M{"$unset": bson.M{"stripeCustomerId": ""}})
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Update("stripe_customer_id", nil).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -350,8 +353,10 @@ func changeUserEmail(c *gin.Context) {
 		return
 	}
 
-	db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": user.Id}, bson.M{"$set": bson.M{"email": newEmail}})
-
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Update("email", newEmail).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 	user.Email = newEmail
 	c.JSON(http.StatusOK, user)
 }

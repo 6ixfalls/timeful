@@ -1,153 +1,81 @@
 package db
 
 import (
-	"context"
-
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"schej.it/server/logger"
+	"gorm.io/gorm"
 	"schej.it/server/models"
 )
 
-func CreateFolder(folder *models.Folder) (primitive.ObjectID, error) {
-	result, err := FoldersCollection.InsertOne(context.Background(), folder)
-	if err != nil {
-		logger.StdErr.Panicln(err)
-		return primitive.NilObjectID, err
-	}
-	return result.InsertedID.(primitive.ObjectID), nil
+func CreateFolder(folder *models.Folder) (models.ID, error) {
+	err := orm.Create(folder).Error
+	return folder.Id, err
 }
 
-func GetFolderById(folderId primitive.ObjectID, userId primitive.ObjectID) (*models.Folder, error) {
+func GetFolderById(folderID, userID models.ID) (*models.Folder, error) {
 	var folder models.Folder
-	err := FoldersCollection.FindOne(context.Background(), bson.M{
-		"_id":    folderId,
-		"userId": userId,
-		"$or": bson.A{
-			bson.M{"isDeleted": bson.M{"$exists": false}},
-			bson.M{"isDeleted": false},
-		},
-	}).Decode(&folder)
-	if err != nil {
-		return nil, err
-	}
-
-	return &folder, nil
+	err := orm.Where("id = ? AND user_id = ? AND COALESCE(is_deleted, false) = false", folderID, userID).First(&folder).Error
+	return &folder, err
 }
 
-func GetAllFolders(userId primitive.ObjectID) ([]models.Folder, error) {
-	cursor, err := FoldersCollection.Find(context.Background(), bson.M{
-		"userId": userId,
-		"$or": bson.A{
-			bson.M{"isDeleted": bson.M{"$exists": false}},
-			bson.M{"isDeleted": false},
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-
+func GetAllFolders(userID models.ID) ([]models.Folder, error) {
 	var folders []models.Folder
-	if err = cursor.All(context.Background(), &folders); err != nil {
+	if err := orm.Where("user_id = ? AND COALESCE(is_deleted, false) = false", userID).Find(&folders).Error; err != nil {
 		return nil, err
 	}
-
-	for i, folder := range folders {
-		events, err := GetEventsInFolder(folder.Id, userId)
+	for i := range folders {
+		events, err := GetEventsInFolder(folders[i].Id, userID)
 		if err != nil {
 			return nil, err
 		}
-		if events != nil {
-			folders[i].EventIds = events
-		} else {
-			folders[i].EventIds = []primitive.ObjectID{}
+		if events == nil {
+			events = []models.ID{}
 		}
+		folders[i].EventIds = events
 	}
-
 	return folders, nil
 }
 
-func GetEventsInFolder(folderId primitive.ObjectID, userId primitive.ObjectID) ([]primitive.ObjectID, error) {
-	cursor, err := FolderEventsCollection.Find(context.Background(), bson.M{
-		"folderId": folderId,
-		"userId":   userId,
-	}, options.Find().SetProjection(bson.M{"eventId": 1}))
-	if err != nil {
+func GetEventsInFolder(folderID, userID models.ID) ([]models.ID, error) {
+	var mappings []models.FolderEvent
+	if err := orm.Select("event_id").Where("folder_id = ? AND user_id = ?", folderID, userID).Find(&mappings).Error; err != nil {
 		return nil, err
 	}
-
-	var eventIdsResponse []struct {
-		EventId primitive.ObjectID `bson:"eventId"`
+	ids := make([]models.ID, len(mappings))
+	for i := range mappings {
+		ids[i] = mappings[i].EventId
 	}
-	if err = cursor.All(context.Background(), &eventIdsResponse); err != nil {
-		return nil, err
-	}
-
-	eventIds := make([]primitive.ObjectID, len(eventIdsResponse))
-	for i, eventId := range eventIdsResponse {
-		eventIds[i] = eventId.EventId
-	}
-
-	return eventIds, nil
+	return ids, nil
 }
 
-func UpdateFolder(folderId primitive.ObjectID, userId primitive.ObjectID, updates bson.M) error {
-	_, err := FoldersCollection.UpdateOne(context.Background(), bson.M{"_id": folderId, "userId": userId}, bson.M{"$set": updates})
-	return err
+func UpdateFolder(folderID, userID models.ID, updates map[string]interface{}) error {
+	return orm.Model(&models.Folder{}).Where("id = ? AND user_id = ?", folderID, userID).Updates(updates).Error
 }
 
-func SetEventFolder(eventId primitive.ObjectID, folderId *primitive.ObjectID, userId primitive.ObjectID) error {
-	ctx := context.Background()
-
-	// Remove any existing mapping for this event
-	_, err := FolderEventsCollection.DeleteMany(ctx, bson.M{"eventId": eventId, "userId": userId})
-	if err != nil {
-		return err
-	}
-
-	// If folderId is nil, we just un-assign it. Otherwise, create a new mapping
-	if folderId != nil {
-		_, err = FolderEventsCollection.InsertOne(ctx, models.FolderEvent{
-			FolderId: *folderId,
-			EventId:  eventId,
-			UserId:   userId,
-		})
-		if err != nil {
+func SetEventFolder(eventID models.ID, folderID *models.ID, userID models.ID) error {
+	return orm.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("event_id = ? AND user_id = ?", eventID, userID).Delete(&models.FolderEvent{}).Error; err != nil {
 			return err
 		}
-	}
-
-	return nil
+		if folderID != nil {
+			return tx.Create(&models.FolderEvent{FolderId: *folderID, EventId: eventID, UserId: userID}).Error
+		}
+		return nil
+	})
 }
 
-func DeleteFolder(folderId primitive.ObjectID, userId primitive.ObjectID) error {
-	ctx := context.Background()
-	// Mark this folder as deleted
-	_, err := FoldersCollection.UpdateOne(ctx, bson.M{"_id": folderId, "userId": userId}, bson.M{"$set": bson.M{"isDeleted": true}})
-	if err != nil {
-		return err
-	}
-
-	// Find all event mappings for this folder
-	eventIds, err := GetEventsInFolder(folderId, userId)
-	if err != nil {
-		return err
-	}
-
-	// Mark all events in this folder as deleted (if the user owns the event)
-	if len(eventIds) > 0 {
-		_, err = EventsCollection.UpdateMany(ctx, bson.M{"_id": bson.M{"$in": eventIds}, "ownerId": userId}, bson.M{"$set": bson.M{"isDeleted": true}})
-		if err != nil {
+func DeleteFolder(folderID, userID models.ID) error {
+	return orm.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.Folder{}).Where("id = ? AND user_id = ?", folderID, userID).Update("is_deleted", true).Error; err != nil {
 			return err
 		}
-	}
-
-	// Delete the mappings
-	_, err = FolderEventsCollection.DeleteMany(ctx, bson.M{"folderId": folderId, "userId": userId})
-	if err != nil {
-		return err
-	}
-
-	return nil
+		var eventIDs []models.ID
+		if err := tx.Model(&models.FolderEvent{}).Where("folder_id = ? AND user_id = ?", folderID, userID).Pluck("event_id", &eventIDs).Error; err != nil {
+			return err
+		}
+		if len(eventIDs) > 0 {
+			if err := tx.Model(&models.Event{}).Where("id IN ? AND owner_id = ?", eventIDs, userID).Update("is_deleted", true).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("folder_id = ? AND user_id = ?", folderID, userID).Delete(&models.FolderEvent{}).Error
+	})
 }

@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/db"
 	"schej.it/server/logger"
 	"schej.it/server/models"
@@ -226,18 +223,16 @@ func RefreshUserTokenIfNecessary(u *models.User, accounts models.Set[string]) {
 		}
 		if calendarAccount, ok := u.CalendarAccounts[calendarAccountKey]; ok {
 			calendarAccount.OAuth2CalendarAuth.AccessToken = res.TokenResponse.AccessToken
-			calendarAccount.OAuth2CalendarAuth.AccessTokenExpireDate = primitive.NewDateTimeFromTime(accessTokenExpireDate)
+			calendarAccount.OAuth2CalendarAuth.AccessTokenExpireDate = models.NewDateTime(accessTokenExpireDate)
 			u.CalendarAccounts[calendarAccountKey] = calendarAccount
 		}
 	}
 
 	// Update user object if accounts were updated
 	if numAccountsToUpdate > 0 {
-		db.UsersCollection.FindOneAndUpdate(
-			context.Background(),
-			bson.M{"_id": u.Id},
-			bson.M{"$set": u},
-		)
+		if err := db.ORM().Model(&models.User{}).Where("id = ?", u.Id).Update("calendar_accounts", u.CalendarAccounts).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	}
 }
 

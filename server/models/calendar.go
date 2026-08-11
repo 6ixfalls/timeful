@@ -1,9 +1,5 @@
 package models
 
-import (
-	"go.mongodb.org/mongo-driver/bson/primitive"
-)
-
 // CalendarType is an enum representing the type of calendar
 type CalendarType string
 
@@ -17,7 +13,7 @@ const (
 // OAuth2CalendarAuth contains necessary auth info for the user's google calendar account
 type OAuth2CalendarAuth struct {
 	AccessToken           string             `json:"-" bson:"accessToken,omitempty"`
-	AccessTokenExpireDate primitive.DateTime `json:"-" bson:"accessTokenExpireDate,omitempty"`
+	AccessTokenExpireDate DateTime `json:"-" bson:"accessTokenExpireDate,omitempty"`
 	RefreshToken          string             `json:"-" bson:"refreshToken,omitempty"`
 	Scope                 string             `json:"-" bson:"scope,omitempty"`
 }
@@ -72,8 +68,8 @@ type CalendarEvent struct {
 	Id         string             `json:"id" bson:"id,omitempty"`
 	CalendarId string             `json:"calendarId" bson:"calendarId,omitempty"`
 	Summary    string             `json:"summary" bson:"summary,omitempty"`
-	StartDate  primitive.DateTime `json:"startDate" bson:"startDate,omitempty"`
-	EndDate    primitive.DateTime `json:"endDate" bson:"endDate,omitempty"`
+	StartDate  DateTime `json:"startDate" bson:"startDate,omitempty"`
+	EndDate    DateTime `json:"endDate" bson:"endDate,omitempty"`
 
 	// Whether the user is free during this event
 	Free bool `json:"free" bson:"free,omitempty"`

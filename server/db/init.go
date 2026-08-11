@@ -1,72 +1,67 @@
 package db
 
 import (
-	"context"
+	"fmt"
 	"os"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"schej.it/server/logger"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+	"schej.it/server/models"
 )
 
-var Client *mongo.Client
-var Db *mongo.Database
-var EventsCollection *mongo.Collection
-var UsersCollection *mongo.Collection
-var DailyUserLogCollection *mongo.Collection
-var FriendRequestsCollection *mongo.Collection
-var EventResponsesCollection *mongo.Collection
-var AttendeesCollection *mongo.Collection
-var FoldersCollection *mongo.Collection
-var FolderEventsCollection *mongo.Collection
-var OtpCodesCollection *mongo.Collection
+var orm *gorm.DB
+
+// ORM exposes the configured GORM session for repository code and transactions.
+func ORM() *gorm.DB { return orm }
 
 func Init() func() {
-	// Establish mongodb connection
-	var ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	mongoURI := os.Getenv("MONGODB_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://localhost"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		panic("DATABASE_URL is required")
 	}
 
-	Client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
+	var err error
+	orm, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger:  logger.Default.LogMode(logger.Warn),
+		NowFunc: func() time.Time { return time.Now().UTC() },
+	})
 	if err != nil {
-		logger.StdErr.Panicln(err)
+		panic(fmt.Errorf("connect to PostgreSQL: %w", err))
 	}
 
-	// Define mongodb database + collections
-	Db = Client.Database("schej-it")
-	EventsCollection = Db.Collection("events")
-	UsersCollection = Db.Collection("users")
-	DailyUserLogCollection = Db.Collection("dailyuserlogs")
-	FriendRequestsCollection = Db.Collection("friendrequests")
-	EventResponsesCollection = Db.Collection("eventResponses")
-	AttendeesCollection = Db.Collection("attendees")
-	FoldersCollection = Db.Collection("folders")
-	FolderEventsCollection = Db.Collection("folderEvents")
-	OtpCodesCollection = Db.Collection("otpCodes")
-
-	// Create TTL index so expired OTP docs are auto-deleted
-	otpIndexModel := mongo.IndexModel{
-		Keys:    bson.M{"expiresAt": 1},
-		Options: options.Index().SetExpireAfterSeconds(0),
+	if err := orm.AutoMigrate(
+		&models.User{},
+		&models.Event{},
+		&models.EventResponse{},
+		&models.Attendee{},
+		&models.Folder{},
+		&models.FolderEvent{},
+		&models.DailyUserLog{},
+		&models.FriendRequest{},
+		&models.OtpCode{},
+	); err != nil {
+		panic(fmt.Errorf("migrate PostgreSQL schema: %w", err))
 	}
-	OtpCodesCollection.Indexes().CreateOne(context.Background(), otpIndexModel)
+	if err := orm.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (LOWER(email))").Error; err != nil {
+		panic(fmt.Errorf("create case-insensitive user email index: %w", err))
+	}
+	if err := orm.Where("expires_at < ?", time.Now().UTC()).Delete(&models.OtpCode{}).Error; err != nil {
+		panic(fmt.Errorf("remove expired OTP codes: %w", err))
+	}
 
-	// Return a function to close the connection
+	sqlDB, err := orm.DB()
+	if err != nil {
+		panic(fmt.Errorf("access PostgreSQL connection pool: %w", err))
+	}
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(50)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
 	return func() {
-		Client.Disconnect(ctx)
+		if err := sqlDB.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close PostgreSQL connection: %v\n", err)
+		}
 	}
 }
-
-// MongoDB backup / restore commands
-
-// Backup
-// mongodump --uri="mongodb://localhost:27017" --db=schej-it
-
-// Restore
-// mongorestore --uri="mongodb://localhost:27017" --drop --db=schej-it ./dump

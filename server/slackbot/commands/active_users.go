@@ -1,16 +1,12 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"schej.it/server/db"
 	"schej.it/server/logger"
 	"schej.it/server/models"
@@ -51,45 +47,19 @@ var activeUsers Command = Command{
 		// Query for daily user logs starting from `days` days before the current date
 		startDate := time.Now().AddDate(0, 0, -days)
 		startDate = utils.GetDateAtTime(startDate, "00:00:00")
-		query := bson.M{"date": bson.M{"$gte": primitive.NewDateTimeFromTime(startDate)}}
-		sort := bson.M{"date": -1}
-
 		var logs []models.DailyUserLog
+		if err := db.ORM().Where("date >= ?", startDate).Order("date DESC").Find(&logs).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 		if list {
-			// Find and populate
-			cursor, err := db.DailyUserLogCollection.Aggregate(context.Background(), []bson.M{
-				{"$match": query},
-				{"$sort": sort},
-				{"$lookup": bson.M{
-					"from":         "users",
-					"localField":   "userIds",
-					"foreignField": "_id",
-					"as":           "users",
-				}},
-				{"$project": bson.M{
-					"date":            1,
-					"users._id":       1,
-					"users.firstName": 1,
-					"users.lastName":  1,
-					"users.email":     1,
-				}},
-			})
-			if err != nil {
-				logger.StdErr.Panicln(err)
-			}
-			if err := cursor.All(context.Background(), &logs); err != nil {
-				logger.StdErr.Panicln(err)
-			}
-		} else {
-			// Find matches
-			cursor, err := db.DailyUserLogCollection.Find(context.Background(), query, &options.FindOptions{
-				Sort: sort,
-			})
-			if err != nil {
-				logger.StdErr.Panicln(err)
-			}
-			if err := cursor.All(context.Background(), &logs); err != nil {
-				logger.StdErr.Panicln(err)
+			for i := range logs {
+				if len(logs[i].UserIds) == 0 {
+					logs[i].Users = []models.User{}
+					continue
+				}
+				if err := db.ORM().Where("id IN ?", logs[i].UserIds).Find(&logs[i].Users).Error; err != nil {
+					logger.StdErr.Panicln(err)
+				}
 			}
 		}
 
@@ -100,7 +70,7 @@ var activeUsers Command = Command{
 			for !logs[i].Date.Time().Equal(curDate) && curDate.Before(time.Now()) {
 				// Insert curDate into logs, with an empty users array
 				logs, err = utils.Insert(logs, i+1, models.DailyUserLog{
-					Date:  primitive.NewDateTimeFromTime(curDate),
+					Date:  models.NewDateTime(curDate),
 					Users: make([]models.User, 0),
 				})
 				if err != nil {
@@ -116,7 +86,7 @@ var activeUsers Command = Command{
 		// Add all dates up to the current date
 		for curDate.Before(time.Now()) {
 			logs, err = utils.Insert(logs, 0, models.DailyUserLog{
-				Date:  primitive.NewDateTimeFromTime(curDate),
+				Date:  models.NewDateTime(curDate),
 				Users: make([]models.User, 0),
 			})
 			if err != nil {
@@ -158,19 +128,19 @@ var activeUsers Command = Command{
 			}
 
 			// Generate chart using QuickChart API
-			chart := bson.M{
+			chart := map[string]interface{}{
 				"type": "bar",
-				"data": bson.M{
+				"data": map[string]interface{}{
 					"labels": labels,
-					"datasets": bson.A{bson.M{
+					"datasets": []interface{}{map[string]interface{}{
 						"label": "Active Users",
 						"data":  data,
 					}},
 				},
-				"options": bson.M{
-					"scales": bson.M{
-						"yAxes": bson.A{bson.M{
-							"ticks": bson.M{
+				"options": map[string]interface{}{
+					"scales": map[string]interface{}{
+						"yAxes": []interface{}{map[string]interface{}{
+							"ticks": map[string]interface{}{
 								"stepSize": 1,
 							},
 						}},
@@ -182,7 +152,7 @@ var activeUsers Command = Command{
 			encodedChart := url.PathEscape(string(jsonStr))
 			chartUrl := fmt.Sprintf(`https://quickchart.io/chart?c=%s&backgroundColor=white`, encodedChart)
 
-			SendRawMessage(&Response{ResponseType: "in_channel", Blocks: []bson.M{
+			SendRawMessage(&Response{ResponseType: "in_channel", Blocks: []map[string]interface{}{
 				{
 					"type":      "image",
 					"image_url": chartUrl,

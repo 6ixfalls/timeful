@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,8 +15,6 @@ import (
 	"github.com/stripe/stripe-go/v82/checkout/session"
 	"github.com/stripe/stripe-go/v82/price"
 	"github.com/stripe/stripe-go/v82/webhook"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/db"
 	"schej.it/server/logger"
 	"schej.it/server/middleware"
@@ -222,14 +219,13 @@ func _fulfillCheckout(sessionId string) {
 
 			// Fetch user from database
 			userId := cs.ClientReferenceID
-			userIdObj, err := primitive.ObjectIDFromHex(userId)
-			if err != nil {
+			if _, err := models.ParseID(userId); err != nil {
 				logger.StdErr.Printf("Error parsing user ID: %v", err)
 				return
 			}
 			user := db.GetUserById(userId)
 			if user == nil {
-				logger.StdErr.Printf("Error getting user: %v", err)
+				logger.StdErr.Printf("User %s not found", userId)
 				return
 			}
 
@@ -256,9 +252,12 @@ func _fulfillCheckout(sessionId string) {
 					slackbot.SendTextMessageWithType(message, slackbot.MONETIZATION)
 				}
 
-				user.StripeCustomerId = &cs.Customer.ID
-				user.IsPremium = utils.TruePtr()
-				db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": userIdObj}, bson.M{"$set": user})
+				if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+					"stripe_customer_id": cs.Customer.ID,
+					"is_premium":         true,
+				}).Error; err != nil {
+					logger.StdErr.Printf("Error saving user: %v", err)
+				}
 			}
 		}
 	}
@@ -310,7 +309,7 @@ func stripeWebhook(c *gin.Context) {
 			c.AbortWithStatus(http.StatusBadRequest)
 			return
 		}
-		db.UsersCollection.UpdateOne(context.Background(), bson.M{"stripeCustomerId": inv.Customer.ID}, bson.M{"$set": bson.M{"isPremium": true}})
+		db.ORM().Model(&models.User{}).Where("stripe_customer_id = ?", inv.Customer.ID).Update("is_premium", true)
 		logger.StdOut.Printf("Customer %s renewed Schej!\n", inv.Customer.ID)
 	} else if event.Type == stripe.EventTypeInvoicePaymentFailed {
 		var inv stripe.Invoice
@@ -325,7 +324,7 @@ func stripeWebhook(c *gin.Context) {
 			logger.StdErr.Printf("Error getting user: %v", err)
 			return
 		}
-		db.UsersCollection.UpdateOne(context.Background(), bson.M{"stripeCustomerId": inv.Customer.ID}, bson.M{"$set": bson.M{"isPremium": false}})
+		db.ORM().Model(&models.User{}).Where("stripe_customer_id = ?", inv.Customer.ID).Update("is_premium", false)
 		logger.StdOut.Printf("Customer %s failed to pay for Schej!\n", inv.Customer.ID)
 
 		message := fmt.Sprintf(":x: %s %s (%s) failed to pay for Schej :x:", user.FirstName, user.LastName, user.Email)
@@ -343,7 +342,7 @@ func stripeWebhook(c *gin.Context) {
 			logger.StdErr.Printf("Error getting user: %v", err)
 			return
 		}
-		db.UsersCollection.UpdateOne(context.Background(), bson.M{"stripeCustomerId": sub.Customer.ID}, bson.M{"$set": bson.M{"isPremium": false}})
+		db.ORM().Model(&models.User{}).Where("stripe_customer_id = ?", sub.Customer.ID).Update("is_premium", false)
 		logger.StdOut.Printf("Customer %s cancelled their subscription!\n", sub.Customer.ID)
 
 		message := fmt.Sprintf(":x: %s %s (%s) cancelled their subscription :x:", user.FirstName, user.LastName, user.Email)

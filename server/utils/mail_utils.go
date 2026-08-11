@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"gopkg.in/gomail.v2"
 	"schej.it/server/logger"
 )
@@ -39,12 +38,12 @@ func AddUserToMailchimp(email string, firstName string, lastName string) {
 	// Adds the given user to the default mailchimp audience
 	apiKey := os.Getenv("MAILCHIMP_API_KEY")
 
-	body, _ := json.Marshal(bson.M{
-		"email_address": email, "status": "subscribed", "merge_fields": bson.M{
+	body, _ := json.Marshal(map[string]interface{}{
+		"email_address": email, "status": "subscribed", "merge_fields": map[string]interface{}{
 			"FNAME": firstName,
 			"LNAME": lastName,
 		},
-		"tags": bson.A{"user"},
+		"tags": []interface{}{"user"},
 	})
 	bodyBuffer := bytes.NewBuffer(body)
 
@@ -67,7 +66,7 @@ func AddUserToMailjet(email string, firstName string, lastName string, picture s
 	// Create contact
 	// POST https://api.mailjet.com/v3/REST/contact {"EMAIL", email}
 	// contactId = result.Data[0].ID (integer)
-	body, _ := json.Marshal(bson.M{
+	body, _ := json.Marshal(map[string]interface{}{
 		"Email": email,
 	})
 	bodyBuffer := bytes.NewBuffer(body)
@@ -101,17 +100,17 @@ func AddUserToMailjet(email string, firstName string, lastName string, picture s
 	// Update contact metadata
 	// PUT https://api.mailjet.com/v3/REST/contactdata/$contactId
 	// { "Data": [{"Name": "firstname", "Value":"first name!"}] }
-	body, _ = json.Marshal(bson.M{
-		"Data": bson.A{
-			bson.M{
+	body, _ = json.Marshal(map[string]interface{}{
+		"Data": []interface{}{
+			map[string]interface{}{
 				"Name":  "firstname",
 				"Value": firstName,
 			},
-			bson.M{
+			map[string]interface{}{
 				"Name":  "lastname",
 				"Value": lastName,
 			},
-			bson.M{
+			map[string]interface{}{
 				"Name":  "picture",
 				"Value": picture,
 			},
@@ -133,9 +132,9 @@ func AddUserToMailjet(email string, firstName string, lastName string, picture s
 	// Add contact to "schej users" contact list
 	// POST https://api.mailjet.com/v3/REST/contact/$contactId/managecontactslists
 	// '{ "ContactsLists": [{"Action": "addforce", "ListID": "10219365"}] }'
-	body, _ = json.Marshal(bson.M{
-		"ContactsLists": bson.A{
-			bson.M{
+	body, _ = json.Marshal(map[string]interface{}{
+		"ContactsLists": []interface{}{
+			map[string]interface{}{
 				"Action": "addforce",
 				"ListID": listId,
 			},

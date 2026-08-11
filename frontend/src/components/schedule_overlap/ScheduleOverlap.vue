@@ -1077,7 +1077,7 @@ import Tooltip from "../Tooltip.vue"
 import ColorLegend from "./ColorLegend.vue"
 
 import dayjs from "dayjs"
-import ObjectID from "bson-objectid"
+import { createLongId } from "@/utils/id_utils"
 import utcPlugin from "dayjs/plugin/utc"
 import timezonePlugin from "dayjs/plugin/timezone"
 import AvailabilityTypeToggle from "./AvailabilityTypeToggle.vue"
@@ -4231,7 +4231,7 @@ export default {
       )
 
       return {
-        _id: ObjectID().toString(),
+        _id: createLongId(),
         capacity: 1,
         name: this.newSignUpBlockName,
         ...timeBlock,

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"schej.it/server/logger"
 )
 
@@ -14,9 +13,9 @@ import (
 // Block builder: https://app.slack.com/block-kit-builder/
 
 type Response struct {
-	ResponseType string   `json:"response_type,omitempty"` // ephemeral or in_channel
-	Text         string   `json:"text,omitempty"`
-	Blocks       []bson.M `json:"blocks,omitempty"`
+	ResponseType string                   `json:"response_type,omitempty"` // ephemeral or in_channel
+	Text         string                   `json:"text,omitempty"`
+	Blocks       []map[string]interface{} `json:"blocks,omitempty"`
 }
 
 type Command struct {

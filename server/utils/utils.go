@@ -18,7 +18,6 @@ import (
 
 	"github.com/brianvoe/sjwt"
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/logger"
 	"schej.it/server/models"
 )
@@ -47,13 +46,13 @@ func ParseJWT(jwt string) sjwt.Claims {
 	return claims
 }
 
-func StringToObjectID(s string) primitive.ObjectID {
-	objectID, err := primitive.ObjectIDFromHex(s)
+func StringToID(s string) models.ID {
+	id, err := models.ParseID(s)
 	if err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
-	return objectID
+	return id
 }
 
 // Returns the currently signed in user

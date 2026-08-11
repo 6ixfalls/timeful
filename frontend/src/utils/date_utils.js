@@ -159,11 +159,6 @@ export const getDateWithTimeNum = (date, timeNum, utc = false) => {
   }
 }
 
-/** Returns a date object from the given mongodb objectId */
-export const dateFromObjectId = function (objectId) {
-  return new Date(parseInt(objectId.substring(0, 8), 16) * 1000)
-}
-
 /** Takes a time string (e.g. 13:30) and splits it into hours and minutes, returning an object of the form { hours, minutes } */
 export const splitTime = (timeString) => {
   const [hours, minutes] = timeString.split(":")

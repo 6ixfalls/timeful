@@ -216,7 +216,7 @@ import {
   upgradeDialogTypes,
 } from "@/constants"
 import EventItem from "@/components/EventItem.vue"
-import ObjectID from "bson-objectid"
+import { dateFromLongId, isLongId } from "@/utils/id_utils"
 
 export default {
   name: "Dashboard",
@@ -367,8 +367,8 @@ export default {
       "createNew",
     ]),
     sortEvents(a, b) {
-      if (ObjectID.isValid(a._id) && ObjectID.isValid(b._id)) {
-        return ObjectID(b._id).getTimestamp() - ObjectID(a._id).getTimestamp()
+      if (isLongId(a._id) && isLongId(b._id)) {
+        return dateFromLongId(b._id) - dateFromLongId(a._id)
       }
       return 0
     },

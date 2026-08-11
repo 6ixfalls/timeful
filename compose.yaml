@@ -1,13 +1,17 @@
 name: timeful
 
 services:
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:16
     restart: unless-stopped
+    environment:
+      POSTGRES_DB: timeful
+      POSTGRES_USER: timeful
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Timeful}
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "pg_isready -U timeful -d timeful"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -39,13 +43,13 @@ services:
     env_file:
       - ./server/.env
     environment:
-      MONGODB_URI: mongodb://mongo:27017
+      DATABASE_URL: postgresql://timeful:${POSTGRES_PASSWORD}@postgres:5432/timeful?sslmode=disable
       GIN_MODE: release
     volumes:
       - frontend_dist:/app/frontend/dist:ro
       - server_logs:/app/logs
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
       frontend:
         condition: service_started
@@ -58,6 +62,6 @@ services:
       start_period: 10s
 
 volumes:
-  mongo_data:
+  postgres_data:
   frontend_dist:
   server_logs:

@@ -2,7 +2,6 @@
 package routes
 
 import (
-	"context"
 	"crypto/rand"
 	"fmt"
 	"math/big"
@@ -14,9 +13,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"gorm.io/gorm"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -73,9 +70,9 @@ func signIn(c *gin.Context) {
 
 	// Link events to user
 	for _, eventIdString := range payload.EventsToLink {
-		eventId, err := primitive.ObjectIDFromHex(eventIdString)
+		eventId, err := models.ParseID(eventIdString)
 		if err == nil {
-			db.EventsCollection.UpdateOne(context.Background(), bson.M{"_id": eventId, "ownerId": nil}, bson.M{"$set": bson.M{"ownerId": user.Id}})
+			db.ORM().Model(&models.Event{}).Where("id = ? AND owner_id = ''", eventId).Update("owner_id", user.Id)
 		}
 	}
 
@@ -134,7 +131,7 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 	// Construct calendar auth object
 	calendarAuth := models.OAuth2CalendarAuth{
 		AccessToken:           token.AccessToken,
-		AccessTokenExpireDate: primitive.NewDateTimeFromTime(accessTokenExpireDate),
+		AccessTokenExpireDate: models.NewDateTime(accessTokenExpireDate),
 		RefreshToken:          token.RefreshToken,
 		Scope:                 token.Scope,
 	}
@@ -196,7 +193,7 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 	}
 	canonicalKey := utils.GetCalendarAccountKey(email, calendarType)
 
-	var userId primitive.ObjectID
+	var userId models.ID
 	existing := db.GetUserByEmail(email)
 	// If user doesn't exist, create a new user
 	if existing == nil {
@@ -212,12 +209,11 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 		}
 
 		// Create user
-		res, err := db.UsersCollection.InsertOne(context.Background(), userData)
-		if err != nil {
+		if err := db.ORM().Create(&userData).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 
-		userId = res.InsertedID.(primitive.ObjectID)
+		userId = userData.Id
 
 		// slackbot.SendTextMessage(fmt.Sprintf(":wave: %s %s (%s) has joined schej.it!", firstName, lastName, email))
 	} else {
@@ -269,13 +265,21 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 		userData.CalendarAccounts = calAccounts
 		userData.Email = email
 
-		// Update user if exists
-		_, err := db.UsersCollection.UpdateByID(
-			context.Background(),
-			userId,
-			bson.M{"$set": userData},
-		)
-		if err != nil {
+		updates := map[string]interface{}{
+			"email":               userData.Email,
+			"picture":             userData.Picture,
+			"primary_account_key": userData.PrimaryAccountKey,
+			"timezone_offset":     userData.TimezoneOffset,
+			"token_origin":        userData.TokenOrigin,
+			"calendar_accounts":   userData.CalendarAccounts,
+		}
+		if userData.FirstName != "" {
+			updates["first_name"] = userData.FirstName
+		}
+		if userData.LastName != "" {
+			updates["last_name"] = userData.LastName
+		}
+		if err := db.ORM().Model(&models.User{}).Where("id = ?", userId).Updates(updates).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	}
@@ -368,7 +372,7 @@ func sendOtp(c *gin.Context) {
 	email := strings.ToLower(strings.TrimSpace(payload.Email))
 
 	// Delete any existing OTP codes for this email
-	db.OtpCodesCollection.DeleteMany(context.Background(), bson.M{"email": email})
+	db.ORM().Where("email = ?", email).Delete(&models.OtpCode{})
 
 	code := generateOtpCode()
 	otpDoc := models.OtpCode{
@@ -378,8 +382,7 @@ func sendOtp(c *gin.Context) {
 		Attempts:  0,
 	}
 
-	_, err := db.OtpCodesCollection.InsertOne(context.Background(), otpDoc)
-	if err != nil {
+	if err := db.ORM().Create(&otpDoc).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -388,7 +391,7 @@ func sendOtp(c *gin.Context) {
 		logger.StdErr.Panicln("LISTMONK_OTP_EMAIL_TEMPLATE_ID is not set or invalid")
 	}
 
-	listmonk.SendEmailAddSubscriberIfNotExist(email, otpTemplateId, bson.M{
+	listmonk.SendEmailAddSubscriberIfNotExist(email, otpTemplateId, map[string]interface{}{
 		"code": code,
 	}, false, "Timeful <noreply@timeful.app>")
 
@@ -418,12 +421,9 @@ func verifyOtp(c *gin.Context) {
 
 	// Find the OTP document
 	var otpDoc models.OtpCode
-	err := db.OtpCodesCollection.FindOne(context.Background(), bson.M{
-		"email":     email,
-		"expiresAt": bson.M{"$gt": time.Now()},
-	}).Decode(&otpDoc)
+	err := db.ORM().Where("email = ? AND expires_at > ?", email, time.Now()).Order("expires_at DESC").First(&otpDoc).Error
 
-	if err == mongo.ErrNoDocuments {
+	if err == gorm.ErrRecordNotFound {
 		c.JSON(http.StatusBadRequest, responses.Error{Error: errs.OtpExpired})
 		return
 	} else if err != nil {
@@ -432,15 +432,13 @@ func verifyOtp(c *gin.Context) {
 
 	// Rate-limit: max 5 attempts per code
 	if otpDoc.Attempts >= 5 {
-		db.OtpCodesCollection.DeleteOne(context.Background(), bson.M{"_id": otpDoc.Id})
+		db.ORM().Delete(&otpDoc)
 		c.JSON(http.StatusTooManyRequests, responses.Error{Error: errs.OtpTooManyAttempts})
 		return
 	}
 
 	// Increment attempts
-	db.OtpCodesCollection.UpdateByID(context.Background(), otpDoc.Id, bson.M{
-		"$inc": bson.M{"attempts": 1},
-	})
+	db.ORM().Model(&otpDoc).UpdateColumn("attempts", gorm.Expr("attempts + 1"))
 
 	if otpDoc.Code != payload.Code {
 		c.JSON(http.StatusBadRequest, responses.Error{Error: errs.OtpInvalidCode})
@@ -448,10 +446,10 @@ func verifyOtp(c *gin.Context) {
 	}
 
 	// OTP verified — delete it
-	db.OtpCodesCollection.DeleteOne(context.Background(), bson.M{"_id": otpDoc.Id})
+	db.ORM().Delete(&otpDoc)
 
 	// Find or create user
-	var userId primitive.ObjectID
+	var userId models.ID
 	existing := db.GetUserByEmail(email)
 
 	if existing == nil {
@@ -466,11 +464,10 @@ func verifyOtp(c *gin.Context) {
 			TokenOrigin:    models.WEB,
 		}
 
-		res, err := db.UsersCollection.InsertOne(context.Background(), userData)
-		if err != nil {
+		if err := db.ORM().Create(&userData).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
-		userId = res.InsertedID.(primitive.ObjectID)
+		userId = userData.Id
 
 		if exists, listmonkUserId := listmonk.DoesUserExist(email); exists {
 			listmonk.AddUserToListmonk(email, firstName, lastName, "", listmonkUserId, true)

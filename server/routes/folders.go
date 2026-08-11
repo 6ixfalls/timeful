@@ -5,8 +5,6 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/db"
 	"schej.it/server/middleware"
 	"schej.it/server/models"
@@ -33,7 +31,7 @@ func InitFolders(router *gin.RouterGroup) {
 func GetAllFolders(c *gin.Context) {
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
@@ -64,13 +62,13 @@ func GetAllFolders(c *gin.Context) {
 func GetFolder(c *gin.Context) {
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	folderId, err := primitive.ObjectIDFromHex(c.Param("folderId"))
+	folderId, err := models.ParseID(c.Param("folderId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid folder ID"})
 		return
@@ -118,7 +116,7 @@ func CreateFolder(c *gin.Context) {
 
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
@@ -150,7 +148,7 @@ func CreateFolder(c *gin.Context) {
 // @Failure 500 {object} map[string]string "Failed to update folder"
 // @Router /user/folders/{folderId} [patch]
 func UpdateFolder(c *gin.Context) {
-	folderId, err := primitive.ObjectIDFromHex(c.Param("folderId"))
+	folderId, err := models.ParseID(c.Param("folderId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid folder ID"})
 		return
@@ -167,18 +165,18 @@ func UpdateFolder(c *gin.Context) {
 
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	updates := bson.M{}
+	updates := map[string]interface{}{}
 	if body.Name != nil {
-		updates["name"] = body.Name
+		updates["name"] = *body.Name
 	}
 	if body.Color != nil {
-		updates["color"] = body.Color
+		updates["color"] = *body.Color
 	}
 
 	err = db.UpdateFolder(folderId, userId, updates)
@@ -199,14 +197,14 @@ func UpdateFolder(c *gin.Context) {
 // @Failure 500 {object} map[string]string "Failed to delete folder"
 // @Router /user/folders/{folderId} [delete]
 func DeleteFolder(c *gin.Context) {
-	folderId, err := primitive.ObjectIDFromHex(c.Param("folderId"))
+	folderId, err := models.ParseID(c.Param("folderId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid folder ID"})
 		return
 	}
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return

@@ -2,7 +2,6 @@
 package routes
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,8 +13,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"gorm.io/gorm"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -58,14 +56,14 @@ func InitEvents(router *gin.RouterGroup) {
 func createEvent(c *gin.Context) {
 	payload := struct {
 		// Required parameters
-		Name     string               `json:"name" binding:"required"`
-		Duration *float32             `json:"duration" binding:"required"`
-		Dates    []primitive.DateTime `json:"dates" binding:"required"`
-		Type     models.EventType     `json:"type" binding:"required"`
+		Name     string            `json:"name" binding:"required"`
+		Duration *float32          `json:"duration" binding:"required"`
+		Dates    []models.DateTime `json:"dates" binding:"required"`
+		Type     models.EventType  `json:"type" binding:"required"`
 
 		// Only for specific times for specific dates events
-		HasSpecificTimes *bool                `json:"hasSpecificTimes"`
-		Times            []primitive.DateTime `json:"times"`
+		HasSpecificTimes *bool             `json:"hasSpecificTimes"`
+		Times            []models.DateTime `json:"times"`
 
 		// PostHog ID for the event creator
 		CreatorPosthogId *string `json:"creatorPosthogId"`
@@ -98,23 +96,23 @@ func createEvent(c *gin.Context) {
 	userIdInterface := session.Get("userId")
 	userId, signedIn := userIdInterface.(string)
 	var user *models.User
-	var ownerId primitive.ObjectID
+	var ownerId models.ID
 	if signedIn {
 		user = db.GetUserById(userId)
 		if user == nil {
 			signedIn = false
-			ownerId = primitive.NilObjectID
+			ownerId = models.NilID
 		} else {
-			ownerId = utils.StringToObjectID(userId)
+			ownerId = utils.StringToID(userId)
 		}
 	} else {
-		ownerId = primitive.NilObjectID
+		ownerId = models.NilID
 	}
 
 	// Construct event object
 	numResponses := 0
 	event := models.Event{
-		Id:                       primitive.NewObjectID(),
+		Id:                       models.NewID(),
 		OwnerId:                  ownerId,
 		CreatorPosthogId:         payload.CreatorPosthogId,
 		Name:                     payload.Name,
@@ -165,6 +163,10 @@ func createEvent(c *gin.Context) {
 		event.Remindees = &remindees
 	}
 
+	if err := db.ORM().Create(&event).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
+
 	attendees := make([]models.Attendee, 0)
 	if payload.Type == models.GROUP {
 
@@ -204,7 +206,7 @@ func createEvent(c *gin.Context) {
 			// Add attendees to attendees array and send invite emails
 			availabilityGroupInviteEmailId := 9
 			for _, email := range payload.Attendees {
-				listmonk.SendEmailAddSubscriberIfNotExist(email, availabilityGroupInviteEmailId, bson.M{
+				listmonk.SendEmailAddSubscriberIfNotExist(email, availabilityGroupInviteEmailId, map[string]interface{}{
 					"ownerName": ownerName,
 					"groupName": event.Name,
 					"groupUrl":  fmt.Sprintf("%s/g/%s", utils.GetBaseUrl(), event.GetId()),
@@ -215,22 +217,21 @@ func createEvent(c *gin.Context) {
 		}
 
 		for _, attendee := range attendees {
-			db.AttendeesCollection.InsertOne(context.Background(), attendee)
+			if err := db.ORM().Create(&attendee).Error; err != nil {
+				logger.StdErr.Panicln(err)
+			}
 		}
 	}
 
-	// Insert event
-	result, err := db.EventsCollection.InsertOne(context.Background(), event)
-	if err != nil {
-		logger.StdErr.Panicln(err)
-	}
-	insertedId := result.InsertedID.(primitive.ObjectID).Hex()
+	insertedId := event.Id.Hex()
 
 	// Send slackbot message
 	// var creator string
 	if signedIn {
 		// creator = fmt.Sprintf("%s %s (%s)", user.FirstName, user.LastName, user.Email)
-		db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": ownerId}, bson.M{"$inc": bson.M{"numEventsCreated": 1}})
+		if err := db.ORM().Model(&models.User{}).Where("id = ?", ownerId).UpdateColumn("num_events_created", gorm.Expr("COALESCE(num_events_created, 0) + 1")).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	} else {
 		// creator = "Guest :face_with_open_eyes_and_hand_over_mouth:"
 	}
@@ -249,14 +250,14 @@ func createEvent(c *gin.Context) {
 func editEvent(c *gin.Context) {
 	payload := struct {
 		// Required parameters
-		Name     string               `json:"name" binding:"required"`
-		Duration *float32             `json:"duration" binding:"required"`
-		Dates    []primitive.DateTime `json:"dates" binding:"required"`
-		Type     models.EventType     `json:"type" binding:"required"`
+		Name     string            `json:"name" binding:"required"`
+		Duration *float32          `json:"duration" binding:"required"`
+		Dates    []models.DateTime `json:"dates" binding:"required"`
+		Type     models.EventType  `json:"type" binding:"required"`
 
 		// Only for specific times for specific dates events
-		HasSpecificTimes *bool                `json:"hasSpecificTimes"`
-		Times            []primitive.DateTime `json:"times"`
+		HasSpecificTimes *bool             `json:"hasSpecificTimes"`
+		Times            []models.DateTime `json:"times"`
 
 		// For both events and groups
 		Description *string `json:"description"`
@@ -292,15 +293,15 @@ func editEvent(c *gin.Context) {
 	session := sessions.Default(c)
 	userIdInterface := session.Get("userId")
 	userId, signedIn := userIdInterface.(string)
-	var ownerId primitive.ObjectID
+	var ownerId models.ID
 	if signedIn {
-		ownerId = utils.StringToObjectID(userId)
+		ownerId = utils.StringToID(userId)
 	} else {
-		ownerId = primitive.NilObjectID
+		ownerId = models.NilID
 	}
 
 	// If event has an owner id, check if user has permissions to edit event
-	if event.OwnerId != primitive.NilObjectID {
+	if event.OwnerId != models.NilID {
 		if event.OwnerId != ownerId {
 			c.JSON(http.StatusForbidden, responses.Error{Error: errs.UserNotEventOwner})
 			return
@@ -331,7 +332,7 @@ func editEvent(c *gin.Context) {
 
 		// Determine owner name
 		var ownerName string
-		if event.OwnerId == primitive.NilObjectID {
+		if event.OwnerId == models.NilID {
 			ownerName = "Somebody"
 		} else {
 			owner := db.GetUserById(event.OwnerId.Hex())
@@ -370,7 +371,7 @@ func editEvent(c *gin.Context) {
 		// Determine owner name
 		var ownerName string
 		var owner *models.User
-		if event.OwnerId != primitive.NilObjectID {
+		if event.OwnerId != models.NilID {
 			owner = db.GetUserById(event.OwnerId.Hex())
 			ownerName = owner.FirstName
 		} else {
@@ -389,9 +390,13 @@ func editEvent(c *gin.Context) {
 						// Remove response from array
 						for i := range eventResponses {
 							if eventResponses[i].UserId == removedUser.Id.Hex() {
-								db.EventResponsesCollection.DeleteOne(context.Background(), bson.M{
-									"_id": eventResponses[i].Id,
-								})
+								if err := db.ORM().Delete(&eventResponses[i]).Error; err != nil {
+									logger.StdErr.Panicln(err)
+								}
+								if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+									UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) - 1")).Error; err != nil {
+									logger.StdErr.Panicln(err)
+								}
 								*event.NumResponses--
 								break
 							}
@@ -399,10 +404,9 @@ func editEvent(c *gin.Context) {
 					}
 
 					// Remove attendee from attendees collection
-					db.AttendeesCollection.DeleteOne(context.Background(), bson.M{
-						"email":   removedEmail.Value,
-						"eventId": event.Id,
-					})
+					if err := db.ORM().Where("email = ? AND event_id = ?", removedEmail.Value, event.Id).Delete(&models.Attendee{}).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
 				}
 			}
 		}
@@ -410,16 +414,18 @@ func editEvent(c *gin.Context) {
 		for _, addedEmail := range added {
 			// Send invite email
 			availabilityGroupInviteEmailId := 9
-			listmonk.SendEmailAddSubscriberIfNotExist(addedEmail.Value, availabilityGroupInviteEmailId, bson.M{
+			listmonk.SendEmailAddSubscriberIfNotExist(addedEmail.Value, availabilityGroupInviteEmailId, map[string]interface{}{
 				"ownerName": ownerName,
 				"groupName": event.Name,
 				"groupUrl":  fmt.Sprintf("%s/g/%s", utils.GetBaseUrl(), event.GetId()),
 			}, false)
-			db.AttendeesCollection.InsertOne(context.Background(), models.Attendee{
+			if err := db.ORM().Create(&models.Attendee{
 				Email:    addedEmail.Value,
 				Declined: utils.FalsePtr(),
 				EventId:  event.Id,
-			})
+			}).Error; err != nil {
+				logger.StdErr.Panicln(err)
+			}
 		}
 
 		// Send group update emails
@@ -428,7 +434,7 @@ func editEvent(c *gin.Context) {
 			addedAttendeeEmailId := 11
 
 			for _, keptEmail := range kept {
-				listmonk.SendEmailAddSubscriberIfNotExist(keptEmail.Value, addedAttendeeEmailId, bson.M{
+				listmonk.SendEmailAddSubscriberIfNotExist(keptEmail.Value, addedAttendeeEmailId, map[string]interface{}{
 					"ownerName": ownerName,
 					"groupName": event.Name,
 					"groupUrl":  fmt.Sprintf("%s/g/%s", utils.GetBaseUrl(), event.GetId()),
@@ -439,17 +445,23 @@ func editEvent(c *gin.Context) {
 	}
 
 	// Update event object
-	_, err := db.EventsCollection.UpdateOne(
-		context.Background(),
-		bson.M{
-			"_id": event.Id,
-		},
-		bson.M{
-			"$set": event,
-		},
-	)
-
-	if err != nil {
+	if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+		"name":                         event.Name,
+		"description":                  event.Description,
+		"duration":                     event.Duration,
+		"dates":                        event.Dates,
+		"times":                        event.Times,
+		"has_specific_times":           event.HasSpecificTimes,
+		"sign_up_blocks":               event.SignUpBlocks,
+		"start_on_monday":              event.StartOnMonday,
+		"notifications_enabled":        event.NotificationsEnabled,
+		"blind_availability_enabled":   event.BlindAvailabilityEnabled,
+		"days_only":                    event.DaysOnly,
+		"send_email_after_x_responses": event.SendEmailAfterXResponses,
+		"collect_emails":               event.CollectEmails,
+		"type":                         event.Type,
+		"remindees":                    event.Remindees,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -689,7 +701,7 @@ func getResponses(c *gin.Context) {
 
 	// Filter availability slice based on timeMin and timeMax
 	for userId, response := range responsesMap {
-		subsetAvailability := make([]primitive.DateTime, 0)
+		subsetAvailability := make([]models.DateTime, 0)
 		for _, timestamp := range response.Availability {
 			if timestamp.Time().Compare(payload.TimeMin) >= 0 && timestamp.Time().Compare(payload.TimeMax) <= 0 {
 				subsetAvailability = append(subsetAvailability, timestamp)
@@ -697,7 +709,7 @@ func getResponses(c *gin.Context) {
 		}
 		response.Availability = subsetAvailability
 
-		subsetIfNeeded := make([]primitive.DateTime, 0)
+		subsetIfNeeded := make([]models.DateTime, 0)
 		for _, timestamp := range response.IfNeeded {
 			if timestamp.Time().Compare(payload.TimeMin) >= 0 && timestamp.Time().Compare(payload.TimeMax) <= 0 {
 				subsetIfNeeded = append(subsetIfNeeded, timestamp)
@@ -705,7 +717,7 @@ func getResponses(c *gin.Context) {
 		}
 		response.IfNeeded = subsetIfNeeded
 
-		subsetManualAvailability := make(map[primitive.DateTime][]primitive.DateTime)
+		subsetManualAvailability := make(map[models.DateTime][]models.DateTime)
 		for timestamp := range utils.Coalesce(response.ManualAvailability) {
 			if timestamp.Time().Compare(payload.TimeMin) >= 0 && timestamp.Time().Compare(payload.TimeMax) <= 0 {
 				subsetManualAvailability[timestamp] = (*response.ManualAvailability)[timestamp]
@@ -787,8 +799,8 @@ func getResponses(c *gin.Context) {
 // @Router /events/{eventId}/response [post]
 func updateEventResponse(c *gin.Context) {
 	payload := struct {
-		Availability []primitive.DateTime `json:"availability"`
-		IfNeeded     []primitive.DateTime `json:"ifNeeded"`
+		Availability []models.DateTime `json:"availability"`
+		IfNeeded     []models.DateTime `json:"ifNeeded"`
 
 		// Guest information
 		Guest *bool  `json:"guest" binding:"required"`
@@ -796,13 +808,13 @@ func updateEventResponse(c *gin.Context) {
 		Email string `json:"email"`
 
 		// Calendar availability variables for Availability Groups feature
-		UseCalendarAvailability *bool                                        `json:"useCalendarAvailability"`
-		EnabledCalendars        *map[string][]string                         `json:"enabledCalendars"`
-		ManualAvailability      *map[primitive.DateTime][]primitive.DateTime `json:"manualAvailability"`
-		CalendarOptions         *models.CalendarOptions                      `json:"calendarOptions"`
+		UseCalendarAvailability *bool                                  `json:"useCalendarAvailability"`
+		EnabledCalendars        *map[string][]string                   `json:"enabledCalendars"`
+		ManualAvailability      *map[models.DateTime][]models.DateTime `json:"manualAvailability"`
+		CalendarOptions         *models.CalendarOptions                `json:"calendarOptions"`
 
 		// Sign up form variables
-		SignUpBlockIds []primitive.ObjectID `json:"signUpBlockIds"`
+		SignUpBlockIds []models.ID `json:"signUpBlockIds"`
 	}{}
 	if err := c.Bind(&payload); err != nil {
 		return
@@ -858,7 +870,7 @@ func updateEventResponse(c *gin.Context) {
 				return
 			}
 			userIdString = userIdInterface.(string)
-			userId := utils.StringToObjectID(userIdString)
+			userId := utils.StringToID(userIdString)
 
 			response = models.Response{
 				UserId:                  userId,
@@ -874,14 +886,9 @@ func updateEventResponse(c *gin.Context) {
 
 				// Set declined to false (in case user declined group in the past)
 				if user != nil {
-					db.AttendeesCollection.UpdateOne(context.Background(), bson.M{
-						"email":   user.Email,
-						"eventId": event.Id,
-					}, bson.M{
-						"$set": bson.M{
-							"declined": false,
-						},
-					})
+					if err := db.ORM().Model(&models.Attendee{}).Where("email = ? AND event_id = ?", user.Email, event.Id).Update("declined", false).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
 				}
 
 				// Update manual availability
@@ -890,7 +897,7 @@ func updateEventResponse(c *gin.Context) {
 					response.ManualAvailability = existingResponse.ManualAvailability
 				}
 				if response.ManualAvailability == nil {
-					manualAvailability := make(map[primitive.DateTime][]primitive.DateTime)
+					manualAvailability := make(map[models.DateTime][]models.DateTime)
 					response.ManualAvailability = &manualAvailability
 				}
 
@@ -927,19 +934,22 @@ func updateEventResponse(c *gin.Context) {
 
 		// Update event responses
 		if userHasResponded {
-			db.EventResponsesCollection.UpdateOne(context.Background(), bson.M{
-				"_id": eventResponses[idx].Id,
-			}, bson.M{
-				"$set": bson.M{
-					"response": &response,
-				},
-			})
+			eventResponses[idx].Response = &response
+			if err := db.ORM().Model(&models.EventResponse{}).Where("id = ?", eventResponses[idx].Id).Update("response", eventResponses[idx].Response).Error; err != nil {
+				logger.StdErr.Panicln(err)
+			}
 		} else {
-			db.EventResponsesCollection.InsertOne(context.Background(), models.EventResponse{
+			if err := db.ORM().Create(&models.EventResponse{
 				UserId:   userIdString,
 				Response: &response,
 				EventId:  event.Id,
-			})
+			}).Error; err != nil {
+				logger.StdErr.Panicln(err)
+			}
+			if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+				UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) + 1")).Error; err != nil {
+				logger.StdErr.Panicln(err)
+			}
 			*event.NumResponses++
 		}
 	} else {
@@ -965,7 +975,7 @@ func updateEventResponse(c *gin.Context) {
 
 			response = models.SignUpResponse{
 				SignUpBlockIds: payload.SignUpBlockIds,
-				UserId:         utils.StringToObjectID(userIdString),
+				UserId:         utils.StringToID(userIdString),
 			}
 		}
 
@@ -1005,7 +1015,7 @@ func updateEventResponse(c *gin.Context) {
 
 			if event.Type == models.GROUP {
 				someoneRespondedEmailId := 13
-				listmonk.SendEmail(creator.Email, someoneRespondedEmailId, bson.M{
+				listmonk.SendEmail(creator.Email, someoneRespondedEmailId, map[string]interface{}{
 					"groupName":      event.Name,
 					"ownerName":      creator.FirstName,
 					"respondentName": respondentName,
@@ -1013,7 +1023,7 @@ func updateEventResponse(c *gin.Context) {
 				})
 			} else {
 				someoneRespondedEmailId := 10
-				listmonk.SendEmail(creator.Email, someoneRespondedEmailId, bson.M{
+				listmonk.SendEmail(creator.Email, someoneRespondedEmailId, map[string]interface{}{
 					"eventName":      event.Name,
 					"ownerName":      creator.FirstName,
 					"respondentName": respondentName,
@@ -1044,7 +1054,7 @@ func updateEventResponse(c *gin.Context) {
 			}
 
 			sendEmailAfterXResponsesEmailId := 14
-			listmonk.SendEmail(creator.Email, sendEmailAfterXResponsesEmailId, bson.M{
+			listmonk.SendEmail(creator.Email, sendEmailAfterXResponsesEmailId, map[string]interface{}{
 				"eventName":    event.Name,
 				"ownerName":    creator.FirstName,
 				"eventUrl":     fmt.Sprintf("%s/e/%s", utils.GetBaseUrl(), event.GetId()),
@@ -1053,14 +1063,19 @@ func updateEventResponse(c *gin.Context) {
 		}()
 	}
 
-	// Update event in mongodb
-	_, err := db.EventsCollection.UpdateByID(
-		context.Background(),
-		event.Id,
-		bson.M{"$set": event},
-	)
-	if err != nil {
-		logger.StdErr.Panicln(err)
+	// Mongo updated only sign-up responses or the response-notification flag.
+	if utils.Coalesce(event.IsSignUpForm) {
+		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+			"sign_up_responses":            event.SignUpResponses,
+			"send_email_after_x_responses": event.SendEmailAfterXResponses,
+		}).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
+	} else if event.SendEmailAfterXResponses != nil && *event.SendEmailAfterXResponses == -1 {
+		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+			Update("send_email_after_x_responses", event.SendEmailAfterXResponses).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
@@ -1099,9 +1114,13 @@ func deleteEventResponse(c *gin.Context) {
 			// Remove response from array
 			for i := range eventResponses {
 				if eventResponses[i].Response.Name == payload.Name {
-					db.EventResponsesCollection.DeleteOne(context.Background(), bson.M{
-						"_id": eventResponses[i].Id,
-					})
+					if err := db.ORM().Delete(&eventResponses[i]).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
+					if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+						UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) - 1")).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
 					*event.NumResponses--
 					break
 				}
@@ -1129,9 +1148,13 @@ func deleteEventResponse(c *gin.Context) {
 			// Remove response from array
 			for i := range eventResponses {
 				if eventResponses[i].UserId == payload.UserId {
-					db.EventResponsesCollection.DeleteOne(context.Background(), bson.M{
-						"_id": eventResponses[i].Id,
-					})
+					if err := db.ORM().Delete(&eventResponses[i]).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
+					if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+						UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) - 1")).Error; err != nil {
+						logger.StdErr.Panicln(err)
+					}
 					*event.NumResponses--
 					break
 				}
@@ -1142,28 +1165,20 @@ func deleteEventResponse(c *gin.Context) {
 		if event.Type == models.GROUP {
 			user := db.GetUserById(userIdString)
 			if user != nil {
-				db.AttendeesCollection.UpdateOne(context.Background(), bson.M{
-					"email":   user.Email,
-					"eventId": event.Id,
-				}, bson.M{
-					"$set": bson.M{
-						"declined": true,
-					},
-				})
+				if err := db.ORM().Model(&models.Attendee{}).Where("email = ? AND event_id = ?", user.Email, event.Id).Update("declined", true).Error; err != nil {
+					logger.StdErr.Panicln(err)
+				}
 			}
 		}
 	}
 
-	// Update responses in mongodb
-	_, err := db.EventsCollection.UpdateByID(
-		context.Background(),
-		event.Id,
-		bson.M{
-			"$set": event,
-		},
-	)
-	if err != nil {
-		logger.StdErr.Panicln(err)
+	if utils.Coalesce(event.IsSignUpForm) {
+		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+			"sign_up_responses":            event.SignUpResponses,
+			"send_email_after_x_responses": event.SendEmailAfterXResponses,
+		}).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{})
@@ -1256,9 +1271,9 @@ func userResponded(c *gin.Context) {
 	}
 
 	// Update event in database
-	db.EventsCollection.UpdateByID(context.Background(), event.Id, bson.M{
-		"$set": event,
-	})
+	if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Update("remindees", event.Remindees).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 
 	// Email owner of event if all remindees have responded
 	everyoneResponded := true
@@ -1278,7 +1293,7 @@ func userResponded(c *gin.Context) {
 
 		// Send email
 		everyoneRespondedEmailTemplateId := 8
-		listmonk.SendEmail(owner.Email, everyoneRespondedEmailTemplateId, bson.M{
+		listmonk.SendEmail(owner.Email, everyoneRespondedEmailTemplateId, map[string]interface{}{
 			"eventName": event.Name,
 			"eventUrl":  eventUrl,
 		})
@@ -1314,25 +1329,19 @@ func declineInvite(c *gin.Context) {
 	user := userInterface.(*models.User)
 
 	// Check if user is in attendees array
-	attendee := db.AttendeesCollection.FindOne(context.Background(), bson.M{
-		"email":   user.Email,
-		"eventId": event.Id,
-	})
-	if attendee == nil {
-		// User not in attendees array
-		c.JSON(http.StatusNotFound, responses.Error{Error: errs.AttendeeEmailNotFound})
-		return
+	var attendee models.Attendee
+	if err := db.ORM().Where("email = ? AND event_id = ?", user.Email, event.Id).First(&attendee).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, responses.Error{Error: errs.AttendeeEmailNotFound})
+			return
+		}
+		logger.StdErr.Panicln(err)
 	}
 
 	// Decline invite
-	db.AttendeesCollection.UpdateOne(context.Background(), bson.M{
-		"email":   user.Email,
-		"eventId": event.Id,
-	}, bson.M{
-		"$set": bson.M{
-			"declined": true,
-		},
-	})
+	if err := db.ORM().Model(&attendee).Update("declined", true).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -1468,7 +1477,7 @@ func getCalendarAvailabilities(c *gin.Context) {
 func deleteEvent(c *gin.Context) {
 	eventId := c.Param("eventId")
 
-	objectId, err := primitive.ObjectIDFromHex(eventId)
+	eventLongID, err := models.ParseID(eventId)
 	if err != nil {
 		// eventId is malformatted
 		c.Status(http.StatusBadRequest)
@@ -1493,38 +1502,21 @@ func deleteEvent(c *gin.Context) {
 		hasResponses = len(eventResponses) > 1
 	}
 
-	var event models.Event
-
+	event := db.GetEventById(eventId)
+	if event == nil || event.OwnerId != user.Id {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	if hasResponses {
-		// If event has responses, just set isDeleted flag
-		result := db.EventsCollection.FindOneAndUpdate(context.Background(), bson.M{
-			"_id":     objectId,
-			"ownerId": user.Id,
-		}, bson.M{
-			"$set": bson.M{
-				"isDeleted": true,
-			},
-		})
-		err = result.Decode(&event)
-		if err != nil {
+		event.IsDeleted = utils.TruePtr()
+		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Update("is_deleted", event.IsDeleted).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	} else {
-		// If event has no responses, actually delete the event object
-		result := db.EventsCollection.FindOneAndDelete(context.Background(), bson.M{
-			"_id":     objectId,
-			"ownerId": user.Id,
-		})
-		err = result.Decode(&event)
-		if err != nil {
+		if err := db.ORM().Delete(event).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
-
-		// Delete folder associations
-		_, err = db.FolderEventsCollection.DeleteMany(context.Background(), bson.M{
-			"eventId": objectId,
-		})
-		if err != nil {
+		if err := db.ORM().Where("event_id = ?", eventLongID).Delete(&models.FolderEvent{}).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	}
@@ -1576,34 +1568,33 @@ func duplicateEvent(c *gin.Context) {
 	}
 
 	// Update event
-	event.Id = primitive.NewObjectID()
+	event.Id = models.NewID()
 	event.Name = payload.EventName
 	numResponses := 0
 	event.NumResponses = &numResponses
+	shortId := db.GenerateShortEventId(event.Id)
+	event.ShortId = &shortId
+	if err := db.ORM().Create(event).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
+
 	if *payload.CopyAvailability {
 		eventResponses := db.GetEventResponses(eventId)
 		for _, eventResponse := range eventResponses {
-			eventResponse.Id = primitive.NewObjectID()
+			eventResponse.Id = models.NewID()
 			eventResponse.EventId = event.Id
-			_, err := db.EventResponsesCollection.InsertOne(context.Background(), eventResponse)
-			if err != nil {
+			if err := db.ORM().Create(&eventResponse).Error; err != nil {
 				logger.StdErr.Panicln(err)
 			}
 			*event.NumResponses++
 		}
+		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).
+			UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) + ?", len(eventResponses))).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	}
 
-	// Generate short id
-	shortId := db.GenerateShortEventId(event.Id)
-	event.ShortId = &shortId
-
-	// Insert new event
-	result, err := db.EventsCollection.InsertOne(context.Background(), event)
-	if err != nil {
-		logger.StdErr.Panicln(err)
-	}
-
-	insertedId := result.InsertedID.(primitive.ObjectID).Hex()
+	insertedId := event.Id.Hex()
 	c.JSON(http.StatusCreated, gin.H{"eventId": insertedId, "shortId": shortId})
 }
 
@@ -1626,7 +1617,7 @@ func archiveEvent(c *gin.Context) {
 
 	eventId := c.Param("eventId")
 
-	objectId, err := primitive.ObjectIDFromHex(eventId)
+	eventLongID, err := models.ParseID(eventId)
 	if err != nil {
 		// eventId is malformatted
 		c.Status(http.StatusBadRequest)
@@ -1636,17 +1627,7 @@ func archiveEvent(c *gin.Context) {
 	userInterface, _ := c.Get("authUser")
 	user := userInterface.(*models.User)
 
-	result := db.EventsCollection.FindOneAndUpdate(context.Background(), bson.M{
-		"_id":     objectId,
-		"ownerId": user.Id,
-	}, bson.M{
-		"$set": bson.M{
-			"isArchived": payload.Archive,
-		},
-	})
-	var event models.Event
-	err = result.Decode(&event)
-	if err != nil {
+	if err := db.ORM().Model(&models.Event{}).Where("id = ? AND owner_id = ?", eventLongID, user.Id).Update("is_archived", payload.Archive).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -1784,7 +1765,7 @@ func importEvent(c *gin.Context) {
 	}
 
 	// Create local event with new identity
-	newId := primitive.NewObjectID()
+	newId := models.NewID()
 	shortId := db.GenerateShortEventId(newId)
 	numResponses := 0
 
@@ -1801,8 +1782,7 @@ func importEvent(c *gin.Context) {
 	remoteEvent.CreatorPosthogId = nil
 	remoteEvent.SignUpResponses = make(map[string]*models.SignUpResponse)
 
-	_, err = db.EventsCollection.InsertOne(context.Background(), remoteEvent)
-	if err != nil {
+	if err = db.ORM().Create(&remoteEvent).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -1818,7 +1798,7 @@ func importEvent(c *gin.Context) {
 		}
 
 		eventResponse := models.EventResponse{
-			Id:      primitive.NewObjectID(),
+			Id:      models.NewID(),
 			EventId: newId,
 			UserId:  name,
 			Response: &models.Response{
@@ -1829,21 +1809,21 @@ func importEvent(c *gin.Context) {
 			},
 		}
 
-		_, err := db.EventResponsesCollection.InsertOne(context.Background(), eventResponse)
-		if err != nil {
+		if err := db.ORM().Create(&eventResponse).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 		*remoteEvent.NumResponses++
 	}
 
-	// Update NumResponses on the event
-	db.EventsCollection.UpdateOne(context.Background(),
-		bson.M{"_id": newId},
-		bson.M{"$set": bson.M{"numResponses": remoteEvent.NumResponses}},
-	)
+	if err := db.ORM().Model(&models.Event{}).Where("id = ?", remoteEvent.Id).
+		UpdateColumn("num_responses", gorm.Expr("COALESCE(num_responses, 0) + ?", *remoteEvent.NumResponses)).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 
 	// Increment user's NumEventsCreated
-	db.UsersCollection.UpdateOne(context.Background(), bson.M{"_id": user.Id}, bson.M{"$inc": bson.M{"numEventsCreated": 1}})
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).UpdateColumn("num_events_created", gorm.Expr("COALESCE(num_events_created, 0) + 1")).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 
 	c.JSON(http.StatusCreated, gin.H{"eventId": newId.Hex(), "shortId": shortId})
 }

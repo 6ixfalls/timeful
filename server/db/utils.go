@@ -1,97 +1,54 @@
 package db
 
 import (
-	"context"
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"schej.it/server/logger"
+	"gorm.io/gorm"
 	"schej.it/server/models"
 	"schej.it/server/utils"
 )
 
-func GetFriendRequestById(friendRequestId string) *models.FriendRequest {
-	objectId, err := primitive.ObjectIDFromHex(friendRequestId)
+func GetFriendRequestById(requestID string) *models.FriendRequest {
+	id, err := models.ParseID(requestID)
 	if err != nil {
-		// friendRequestId is malformatted
 		return nil
 	}
-	result := FriendRequestsCollection.FindOne(context.Background(), bson.M{
-		"_id": objectId,
-	})
-	if result.Err() == mongo.ErrNoDocuments {
-		// Friend request does not exist!
+	var request models.FriendRequest
+	if err := orm.First(&request, "id = ?", id).Error; err != nil {
+		if err != gorm.ErrRecordNotFound {
+			panic(err)
+		}
 		return nil
 	}
-
-	// Decode result
-	var friendRequest models.FriendRequest
-	if err := result.Decode(&friendRequest); err != nil {
-		logger.StdErr.Panicln(err)
-	}
-
-	return &friendRequest
+	return &request
 }
 
-func DeleteFriendRequestById(friendRequestId string) {
-	objectId, err := primitive.ObjectIDFromHex(friendRequestId)
+func DeleteFriendRequestById(requestID string) {
+	id, err := models.ParseID(requestID)
 	if err != nil {
-		// friendRequestId is malformatted
-		logger.StdErr.Panicln(err)
+		panic(err)
 	}
-	_, err = FriendRequestsCollection.DeleteOne(context.Background(), bson.M{
-		"_id": objectId,
-	})
-	if err != nil {
-		logger.StdErr.Panicln(err)
+	if err := orm.Delete(&models.FriendRequest{}, "id = ?", id).Error; err != nil {
+		panic(err)
 	}
 }
 
-/*
-Finds a daily user log, localized to the user's month/day/year, by:
-Checking if the given date (in server time) and timezone offset (in client time) match the day of a daily user log (in UTC time)
-If none exist, then create a new daily log
-
-Note: we find the log localized to the user's month/day/year in order to track if the user has signed in on different days in their
-own timezone, rather than the server's timezone. For example, if a user signed in at 11pm on Monday, then signed in at 8am on Tuesday,
-it could theoretically count as the same day if we were to use server time
-*/
 func GetDailyUserLogByDate(date time.Time, timezoneOffset int) *models.DailyUserLog {
-	timezoneOffsetDuration, _ := time.ParseDuration(fmt.Sprintf("%dm", timezoneOffset))
-	adjustedDate := date.Add(timezoneOffsetDuration)
-	startDate := utils.GetDateAtTime(adjustedDate, "00:00:00")
-	endDate := utils.GetDateAtTime(adjustedDate, "23:59:59")
-
-	// Find a log for the current date
-	result := DailyUserLogCollection.FindOne(context.Background(), bson.M{
-		"date": bson.M{
-			"$gte": primitive.NewDateTimeFromTime(startDate),
-			"$lte": primitive.NewDateTimeFromTime(endDate),
-		},
-	})
-
+	offset, _ := time.ParseDuration(fmt.Sprintf("%dm", timezoneOffset))
+	adjusted := date.Add(offset)
+	start := utils.GetDateAtTime(adjusted, "00:00:00")
+	end := utils.GetDateAtTime(adjusted, "23:59:59")
 	var log models.DailyUserLog
-
-	// Create a new log if it doesn't exist already
-	if result.Err() == mongo.ErrNoDocuments {
-		log = models.DailyUserLog{
-			Date: primitive.NewDateTimeFromTime(startDate),
+	err := orm.Where("date >= ? AND date <= ?", start, end).First(&log).Error
+	if err == gorm.ErrRecordNotFound {
+		log.Date = models.NewDateTime(start)
+		if err := orm.Create(&log).Error; err != nil {
+			panic(err)
 		}
-		result, err := DailyUserLogCollection.InsertOne(context.Background(), log)
-		if err != nil {
-			logger.StdErr.Panicln(err)
-		}
-		log.Id = result.InsertedID.(primitive.ObjectID)
-	} else {
-		// Parse daily user log object
-		if err := result.Decode(&log); err != nil {
-			logger.StdErr.Panicln(err)
-		}
+	} else if err != nil {
+		panic(err)
 	}
-
 	return &log
 }
 
@@ -102,10 +59,8 @@ func UpdateDailyUserLog(user *models.User) {
 			return
 		}
 	}
-
 	log.UserIds = append(log.UserIds, user.Id)
-	_, err := DailyUserLogCollection.UpdateByID(context.Background(), log.Id, bson.M{"$set": log})
-	if err != nil {
-		logger.StdErr.Panicln(err)
+	if err := orm.Model(&models.DailyUserLog{}).Where("id = ?", log.Id).Update("user_ids", log.UserIds).Error; err != nil {
+		panic(err)
 	}
 }

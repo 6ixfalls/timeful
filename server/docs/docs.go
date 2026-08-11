@@ -2227,6 +2227,10 @@ var doc = `{
         "models.CalendarType": {
             "type": "string"
         },
+        "models.DateTime": {
+            "type": "string",
+            "format": "date-time"
+        },
         "models.Event": {
             "type": "object",
             "properties": {
@@ -2452,7 +2456,7 @@ var doc = `{
                     "additionalProperties": {
                         "type": "array",
                         "items": {
-                            "$ref": "#/definitions/primitive.DateTime"
+                            "$ref": "#/definitions/models.DateTime"
                         }
                     }
                 },

@@ -2,16 +2,12 @@
 package routes
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"schej.it/server/db"
 	"schej.it/server/errs"
 	"schej.it/server/logger"
@@ -81,11 +77,11 @@ func updateName(c *gin.Context) {
 	}
 
 	authUser := utils.GetAuthUser(c)
-
-	_, err := db.UsersCollection.UpdateByID(context.Background(), authUser.Id, bson.M{
-		"$set": bson.M{"firstName": payload.FirstName, "lastName": payload.LastName, "hasCustomName": true},
-	})
-	if err != nil {
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Updates(map[string]interface{}{
+		"first_name":      payload.FirstName,
+		"last_name":       payload.LastName,
+		"has_custom_name": true,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -134,10 +130,7 @@ func updateCalendarOptions(c *gin.Context) {
 	}
 
 	// Update database
-	_, err := db.UsersCollection.UpdateByID(context.Background(), authUser.Id, bson.M{
-		"$set": bson.M{"calendarOptions": authUser.CalendarOptions},
-	})
-	if err != nil {
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_options", authUser.CalendarOptions).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -156,35 +149,17 @@ func getEvents(c *gin.Context) {
 
 	// Get the events associated with the current user
 	events := make([]models.Event, 0)
-	opts := options.Find().SetSort(bson.M{"_id": -1})
-
-	// Get all the event ids that the user has responded to
-	cursor, err := db.EventResponsesCollection.Find(context.Background(), bson.M{"userId": userId.Hex()})
-	if err != nil {
+	eventIds := make([]models.ID, 0)
+	if err := db.ORM().Model(&models.EventResponse{}).Where("user_id = ?", userId.Hex()).Pluck("event_id", &eventIds).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
-	defer cursor.Close(context.Background())
-	eventIds := make([]primitive.ObjectID, 0)
-	for cursor.Next(context.Background()) {
-		var eventResponse models.EventResponse
-		if err := cursor.Decode(&eventResponse); err != nil {
-			logger.StdErr.Panicln(err)
-		}
-		eventIds = append(eventIds, eventResponse.EventId)
-	}
 
-	// Get all the event ids that the user is an attendee of
-	cursor, err = db.AttendeesCollection.Find(context.Background(), bson.M{"email": user.Email, "declined": false})
-	if err != nil {
+	var attendees []models.Attendee
+	if err := db.ORM().Where("email = ? AND COALESCE(declined, false) = false", user.Email).Find(&attendees).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
-	defer cursor.Close(context.Background())
-	hasRespondedEventIds := make(models.Set[primitive.ObjectID])
-	for cursor.Next(context.Background()) {
-		var attendee models.Attendee
-		if err := cursor.Decode(&attendee); err != nil {
-			logger.StdErr.Panicln(err)
-		}
+	hasRespondedEventIds := make(models.Set[models.ID])
+	for _, attendee := range attendees {
 		if utils.Contains(eventIds, attendee.EventId) {
 			hasRespondedEventIds[attendee.EventId] = struct{}{}
 		} else {
@@ -192,30 +167,7 @@ func getEvents(c *gin.Context) {
 		}
 	}
 
-	cursor, err = db.EventsCollection.Find(
-		context.Background(),
-		bson.M{
-			"$and": bson.A{
-				bson.M{
-					"$or": bson.A{
-						bson.M{"_id": bson.M{"$in": eventIds}},
-						bson.M{"ownerId": userId},
-					},
-				},
-				bson.M{
-					"$or": bson.A{
-						bson.M{"isDeleted": bson.M{"$exists": false}},
-						bson.M{"isDeleted": false},
-					},
-				},
-			},
-		},
-		opts,
-	)
-	if err != nil {
-		logger.StdErr.Panicln(err)
-	}
-	if err := cursor.All(context.Background(), &events); err != nil {
+	if err := db.ORM().Where("(id IN ? OR owner_id = ?) AND COALESCE(is_deleted, false) = false", eventIds, userId).Order("id DESC").Find(&events).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -242,7 +194,7 @@ func getEvents(c *gin.Context) {
 // @Success 200
 // @Router /user/events/{eventId}/set-folder [post]
 func setEventFolder(c *gin.Context) {
-	eventId, err := primitive.ObjectIDFromHex(c.Param("eventId"))
+	eventId, err := models.ParseID(c.Param("eventId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid event ID"})
 		return
@@ -258,15 +210,15 @@ func setEventFolder(c *gin.Context) {
 
 	session := sessions.Default(c)
 	userIdString := session.Get("userId").(string)
-	userId, err := primitive.ObjectIDFromHex(userIdString)
+	userId, err := models.ParseID(userIdString)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	var folderId *primitive.ObjectID
+	var folderId *models.ID
 	if body.FolderId != nil {
-		id, err := primitive.ObjectIDFromHex(*body.FolderId)
+		id, err := models.ParseID(*body.FolderId)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid folder ID"})
 			return
@@ -315,11 +267,9 @@ func getCalendars(c *gin.Context) {
 	calendarEvents, editedCalendarAccounts := calendar.GetUsersCalendarEvents(user, accountsSet, payload.TimeMin, payload.TimeMax)
 
 	if editedCalendarAccounts {
-		db.UsersCollection.FindOneAndUpdate(
-			context.Background(),
-			bson.M{"_id": user.Id},
-			bson.M{"$set": user},
-		)
+		if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Update("calendar_accounts", user.CalendarAccounts).Error; err != nil {
+			logger.StdErr.Panicln(err)
+		}
 	}
 
 	c.JSON(http.StatusOK, calendarEvents)
@@ -354,7 +304,7 @@ func addGoogleCalendarAccount(c *gin.Context) {
 
 	calendarAuth := &models.OAuth2CalendarAuth{
 		AccessToken:           tokens.AccessToken,
-		AccessTokenExpireDate: primitive.NewDateTimeFromTime(accessTokenExpireDate),
+		AccessTokenExpireDate: models.NewDateTime(accessTokenExpireDate),
 		RefreshToken:          tokens.RefreshToken,
 	}
 
@@ -442,7 +392,7 @@ func addOutlookCalendarAccount(c *gin.Context) {
 	// Construct calendarAuth object
 	calendarAuth := &models.OAuth2CalendarAuth{
 		AccessToken:           tokens.AccessToken,
-		AccessTokenExpireDate: primitive.NewDateTimeFromTime(accessTokenExpireDate),
+		AccessTokenExpireDate: models.NewDateTime(accessTokenExpireDate),
 		RefreshToken:          tokens.RefreshToken,
 		Scope:                 payload.Scope,
 	}
@@ -570,12 +520,9 @@ func addCalendarAccount(c *gin.Context, args addCalendarAccountArgs) {
 	}
 	authUser.CalendarAccounts[canonicalKey] = calendarAccount
 
-	// Perform mongo update
-	db.UsersCollection.FindOneAndUpdate(
-		context.Background(),
-		bson.M{"_id": authUser.Id},
-		bson.M{"$set": authUser},
-	)
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 }
 
 // @Summary Removes an existing calendar account
@@ -600,17 +547,10 @@ func removeCalendarAccount(c *gin.Context) {
 		calendarAccountKey = utils.GetCalendarAccountKey(payload.Email, payload.CalendarType)
 	}
 
-	db.UsersCollection.UpdateByID(context.Background(), authUser.Id, bson.A{
-		bson.M{"$set": bson.M{
-			"calendarAccounts": bson.M{
-				"$setField": bson.M{
-					"field": calendarAccountKey,
-					"input": "$$ROOT.calendarAccounts",
-					"value": "$$REMOVE",
-				},
-			},
-		}},
-	})
+	delete(authUser.CalendarAccounts, calendarAccountKey)
+	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+		logger.StdErr.Panicln(err)
+	}
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -643,12 +583,7 @@ func toggleCalendar(c *gin.Context) {
 		account.Enabled = payload.Enabled
 		authUser.CalendarAccounts[calendarAccountKey] = account
 
-		_, err := db.UsersCollection.UpdateOne(context.Background(), bson.M{
-			"_id": authUser.Id,
-		}, bson.M{
-			"$set": authUser,
-		})
-		if err != nil {
+		if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
 			logger.StdErr.Panicln(err)
 			return
 		}
@@ -688,12 +623,7 @@ func toggleSubCalendar(c *gin.Context) {
 			(*account.SubCalendars)[payload.SubCalendarId] = subCalendar
 			authUser.CalendarAccounts[calendarAccountKey] = account
 
-			_, err := db.UsersCollection.UpdateOne(context.Background(), bson.M{
-				"_id": authUser.Id,
-			}, bson.M{
-				"$set": authUser,
-			})
-			if err != nil {
+			if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
 				logger.StdErr.Panicln(err)
 				return
 			}
@@ -739,8 +669,7 @@ func deleteUser(c *gin.Context) {
 	userInterface, _ := c.Get("authUser")
 	user := userInterface.(*models.User)
 
-	_, err := db.UsersCollection.DeleteOne(context.Background(), bson.M{"_id": user.Id})
-	if err != nil {
+	if err := db.ORM().Delete(&models.User{}, "id = ?", user.Id).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 

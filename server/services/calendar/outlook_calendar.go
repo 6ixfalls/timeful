@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/models"
 	"schej.it/server/services"
 	"schej.it/server/utils"
@@ -25,7 +23,7 @@ func (calendar *OutlookCalendar) GetCalendarList() (map[string]models.SubCalenda
 			Id   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"value"`
-		Error bson.M `json:"error"`
+		Error map[string]interface{} `json:"error"`
 	}{}
 
 	err := json.NewDecoder(response.Body).Decode(&responseBody)
@@ -68,7 +66,7 @@ func (calendar *OutlookCalendar) GetCalendarEvents(calendarId string, timeMin ti
 			} `json:"end"`
 			ShowAs string `json:"showAs"`
 		} `json:"value"`
-		Error bson.M `json:"error"`
+		Error map[string]interface{} `json:"error"`
 	}{}
 	err := json.NewDecoder(response.Body).Decode(&responseBody)
 	if err != nil {
@@ -97,8 +95,8 @@ func (calendar *OutlookCalendar) GetCalendarEvents(calendarId string, timeMin ti
 			Id:         event.Id,
 			CalendarId: calendarId,
 			Summary:    event.Subject,
-			StartDate:  primitive.NewDateTimeFromTime(startTime),
-			EndDate:    primitive.NewDateTimeFromTime(endTime),
+			StartDate:  models.NewDateTime(startTime),
+			EndDate:    models.NewDateTime(endTime),
 			Free:       event.ShowAs == "free",
 		})
 	}

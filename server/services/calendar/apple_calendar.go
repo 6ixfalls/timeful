@@ -9,7 +9,6 @@ import (
 	"github.com/emersion/go-ical"
 	"github.com/jonyTF/go-webdav"
 	"github.com/jonyTF/go-webdav/caldav"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"schej.it/server/models"
 	"schej.it/server/utils"
 )
@@ -123,8 +122,8 @@ func (calendar *AppleCalendar) GetCalendarEvents(calendarId string, timeMin time
 			Id:         event.Data.Children[0].Props.Get("UID").Value,
 			CalendarId: calendarId,
 			Summary:    event.Data.Children[0].Props.Get("SUMMARY").Value,
-			StartDate:  primitive.NewDateTimeFromTime(startTime),
-			EndDate:    primitive.NewDateTimeFromTime(endTime),
+			StartDate:  models.NewDateTime(startTime),
+			EndDate:    models.NewDateTime(endTime),
 			AllDay:     allDay,
 		})
 	}

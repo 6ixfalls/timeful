@@ -32,7 +32,7 @@ sudo systemctl reload caddy
 
 | Service    | Description                             | Port           |
 | ---------- | --------------------------------------- | -------------- |
-| `mongo`    | MongoDB 7 database                      | Internal only  |
+| `postgres` | PostgreSQL 16 database                  | Internal only  |
 | `frontend` | Vue.js build (outputs to shared volume) | N/A            |
 | `server`   | Go backend                              | 127.0.0.1:3002 |
 
@@ -61,16 +61,14 @@ docker compose down -v            # Stop and remove volumes (deletes data!)
 
 ## Data & Backup
 
-Data is persisted in Docker volumes: `mongo_data`, `frontend_dist`, `server_logs`.
+Data is persisted in Docker volumes: `postgres_data`, `frontend_dist`, `server_logs`.
 
 ```bash
-# Backup MongoDB
-docker compose exec mongo mongodump --db=schej-it --archive=/data/db/backup.archive
-docker compose cp mongo:/data/db/backup.archive ./backup.archive
+# Backup PostgreSQL
+docker compose exec -T postgres pg_dump -U timeful -d timeful -Fc > timeful.dump
 
-# Restore MongoDB
-docker compose cp ./backup.archive mongo:/data/db/backup.archive
-docker compose exec mongo mongorestore --drop --db=schej-it --archive=/data/db/backup.archive
+# Restore PostgreSQL
+docker compose exec -T postgres pg_restore -U timeful -d timeful --clean --if-exists < timeful.dump
 ```
 
 ## Troubleshooting
@@ -80,9 +78,9 @@ docker compose exec mongo mongorestore --drop --db=schej-it --archive=/data/db/b
 docker compose logs server
 ls -la server/.env
 
-# MongoDB connection issues
+# PostgreSQL connection issues
 docker compose ps
-docker compose exec mongo mongosh --eval "db.adminCommand('ping')"
+docker compose exec postgres pg_isready -U timeful -d timeful
 
 # Frontend not loading
 docker compose logs frontend
@@ -105,6 +103,7 @@ Create `server/.env` from the template (`server/.env.template`).
 | `CLIENT_SECRET`  | Google OAuth client secret                                                  |
 | `ENCRYPTION_KEY` | Key for encrypting sensitive data (generate with `openssl rand -base64 32`) |
 | `SESSION_SECRET` | Session cookie encryption key (generate with `openssl rand -base64 32`)     |
+| `DATABASE_URL`   | PostgreSQL connection URL (provided by Compose in production)               |
 
 #### Optional — Payments
 
@@ -139,6 +138,19 @@ Create `server/.env` from the template (`server/.env.template`).
 | `DISCORD_BOT_TOKEN` / `GUILD_ID`             | Discord bot integration                      |
 
 See `server/.env.template` for the complete list.
+
+### PostgreSQL
+
+Set a strong database password before starting Compose:
+
+```bash
+POSTGRES_PASSWORD='replace-with-a-long-random-secret' \
+  docker compose up -d --build
+```
+
+Compose sets `DATABASE_URL` for server. GORM migrates relational tables for
+users, events, responses, attendees, folders, folder-event links, daily logs,
+friend requests, and OTP codes during startup.
 
 ### Google OAuth Setup
 

@@ -90,6 +90,9 @@ definitions:
     type: object
   models.CalendarType:
     type: string
+  models.DateTime:
+    format: date-time
+    type: string
   models.Event:
     properties:
       _id:
@@ -246,7 +249,7 @@ definitions:
       manualAvailability:
         additionalProperties:
           items:
-            $ref: '#/definitions/primitive.DateTime'
+            $ref: '#/definitions/models.DateTime'
           type: array
         description: Mapping from the start date of a day to the available times for
           that day

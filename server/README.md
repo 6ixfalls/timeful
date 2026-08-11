@@ -4,12 +4,13 @@ API docs (available when the server is running): http://localhost:3002/swagger/i
 
 ## Debug
 
-- Install mongodb
+- Install PostgreSQL and create a database
+- Set `DATABASE_URL` in `.env`
 - Install `air`, a package that facilitates live reload for Go apps
   - `go install github.com/cosmtrek/air@latest`
 - To run the server, simply run `air` in the root directory of the server
 
-## Make a backup of the mongodb database
+## Back up PostgreSQL
 
-- Run `mongodump --host="localhost:27017" --db=schej-it` to make a backup
-- Run `mongorestore --uri mongodb://localhost:27017 ./dump --drop` to restore
+- Run `pg_dump "$DATABASE_URL" --format=custom --file=timeful.dump` to back up
+- Run `pg_restore --clean --if-exists --dbname="$DATABASE_URL" timeful.dump` to restore

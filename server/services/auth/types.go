@@ -1,9 +1,5 @@
 package auth
 
-import (
-	"go.mongodb.org/mongo-driver/bson"
-)
-
 type TokenResponse struct {
 	AccessToken      string `json:"access_token"`
 	IdToken          string `json:"id_token"`
@@ -16,9 +12,9 @@ type TokenResponse struct {
 }
 
 type AccessTokenResponse struct {
-	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
-	Scope       string `json:"scope"`
-	TokenType   string `json:"token_type"`
-	Error       bson.M `json:"error"`
+	AccessToken string                 `json:"access_token"`
+	ExpiresIn   int                    `json:"expires_in"`
+	Scope       string                 `json:"scope"`
+	TokenType   string                 `json:"token_type"`
+	Error       map[string]interface{} `json:"error"`
 }

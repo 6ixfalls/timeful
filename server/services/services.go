@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"schej.it/server/logger"
 	"schej.it/server/models"
 	"schej.it/server/services/auth"
@@ -14,7 +13,7 @@ import (
 
 // Calls the given url with the given method using the user's OAuth 2 access token.
 // Set user to nil if refreshing the token is not necessary
-func CallApi(user *models.User, calendarAuth *models.OAuth2CalendarAuth, method string, url string, body *bson.M) *http.Response {
+func CallApi(user *models.User, calendarAuth *models.OAuth2CalendarAuth, method string, url string, body *map[string]interface{}) *http.Response {
 	if user != nil {
 		auth.RefreshUserTokenIfNecessary(user, nil)
 	}

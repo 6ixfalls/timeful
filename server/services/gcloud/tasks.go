@@ -11,7 +11,6 @@ import (
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2beta3"
 	"cloud.google.com/go/cloudtasks/apiv2beta3/cloudtaskspb"
-	"go.mongodb.org/mongo-driver/bson"
 	"google.golang.org/api/option"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"schej.it/server/logger"
@@ -91,10 +90,10 @@ func CreateEmailTask(email string, ownerName string, eventName string, eventId s
 
 	for templateId, scheduleTime := range tasksToCreate {
 		// Create JSON object
-		body, err := json.Marshal(bson.M{
+		body, err := json.Marshal(map[string]interface{}{
 			"subscriber_email": email,
 			"template_id":      templateId,
-			"data": bson.M{
+			"data": map[string]interface{}{
 				"ownerName":   ownerName,
 				"eventName":   eventName,
 				"eventUrl":    eventUrl,
