@@ -43,11 +43,6 @@
           </template>
         </v-checkbox>
 
-        <!-- <v-checkbox v-model="preferences.advertising" hide-details>
-        <template v-slot:label>
-          <span class="tw-flex-1 tw-text-gray-700 tw-font-medium tw-text-sm">Advertising</span>
-        </template>
-      </v-checkbox> -->
       </div>
     </v-expand-transition>
 
@@ -90,7 +85,6 @@ export default {
       preferences: {
         necessary: true,
         analytics: true,
-        advertising: true,
       },
     }
   },
@@ -117,7 +111,6 @@ export default {
       this.preferences = {
         necessary: true,
         analytics: true,
-        advertising: true,
       }
       this.saveConsent()
     },
@@ -126,7 +119,6 @@ export default {
       this.preferences = {
         necessary: true,
         analytics: false,
-        advertising: false,
       }
       this.saveConsent()
     },
@@ -151,7 +143,6 @@ export default {
         name: "cookie-settings",
         query: {
           analytics: this.preferences.analytics ? "1" : "0",
-          advertising: this.preferences.advertising ? "1" : "0",
         },
       })
     },

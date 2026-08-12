@@ -19,7 +19,6 @@ export function setCookieConsent(preferences) {
     preferences: {
       necessary: true, // Always true
       analytics: Boolean(preferences.analytics),
-      advertising: Boolean(preferences.advertising),
     },
   }
 
@@ -30,11 +29,6 @@ export function setCookieConsent(preferences) {
 export function hasAnalyticsConsent() {
   const consent = getCookieConsent()
   return consent?.preferences?.analytics === true
-}
-
-export function hasAdvertisingConsent() {
-  const consent = getCookieConsent()
-  return consent?.preferences?.advertising === true
 }
 
 export function hasGivenConsent() {
@@ -52,14 +46,13 @@ export function initializeGTMConsent() {
     window.dataLayer.push({
       event: "consent_default",
       analytics_consent: consent.preferences.analytics ? "granted" : "denied",
-      ad_consent: consent.preferences.advertising ? "granted" : "denied",
+      ad_consent: "denied",
     })
   } else {
     window.dataLayer.push({
       event: "consent_default",
       analytics_consent: "granted",
-      ad_consent: "granted",
+      ad_consent: "denied",
     })
   }
 }
-

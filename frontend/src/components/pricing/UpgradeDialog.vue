@@ -295,11 +295,6 @@
             Upgrade to schedule events with Timeful. Your payment helps us keep
             the site running.
           </template>
-          <template
-            v-else-if="upgradeDialogType === upgradeDialogTypes.REMOVE_ADS"
-          >
-            Upgrade to remove ads. Your payment helps us keep the site running.
-          </template>
           <template v-else>
             Create unlimited events with Timeful Premium. Your payment helps us
             keep the site running.
@@ -528,30 +523,15 @@ export default {
         )
       )
     },
-    isRemoveAdsMode() {
-      return this.upgradeDialogType === upgradeDialogTypes.REMOVE_ADS
-    },
     freeFeatures() {
-      const events = "Create 3 events per month"
-      const ads = "Ads displayed on all your events"
-      return this.isRemoveAdsMode ? [ads, events] : [events, ads]
+      return ["Create 3 events per month"]
     },
     premiumFeatures() {
       const events = {
         text: "events",
         html: 'Create <span class="rdt-h">unlimited events</span> per month',
       }
-      const noAdsOwn = {
-        text: "no-ads-own",
-        html: '<span class="rdt-h">No ads</span> displayed on your events',
-      }
-      const noAdsOthers = {
-        text: "no-ads-others",
-        html: "<span class=\"rdt-h\">Don't see ads</span> on other people's events",
-      }
-      return this.isRemoveAdsMode
-        ? [noAdsOwn, noAdsOthers, events]
-        : [events, noAdsOwn, noAdsOthers]
+      return [events]
     },
     v2BillingOptions() {
       return [
