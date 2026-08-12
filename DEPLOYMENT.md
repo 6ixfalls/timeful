@@ -43,12 +43,15 @@ variables are read at container startup rather than embedded during image build:
 | `VUE_APP_POSTHOG_API_KEY`      | PostHog project API key     |
 | `VUE_APP_GOOGLE_CLIENT_ID`     | Google OAuth client ID      |
 | `VUE_APP_MICROSOFT_CLIENT_ID`  | Microsoft OAuth client ID   |
+| `VUE_APP_PRIVACY_POLICY_URL`    | Optional privacy policy URL |
 
-All three values are public because browsers can read them. The image also
-accepts `CLIENT_ID` and `MICROSOFT_CLIENT_ID` as fallbacks for their frontend
-counterparts, so existing values in `server/.env` work with Compose. Restart
-the server container after changing them. The server marks `config.js` as
-non-cacheable, so browsers receive the new values.
+All four values are public because browsers can read them. Leave
+`VUE_APP_PRIVACY_POLICY_URL` empty to use the bundled privacy policy page. The
+custom URL must allow iframe embedding. The image also accepts `CLIENT_ID` and
+`MICROSOFT_CLIENT_ID` as fallbacks for their frontend counterparts, so existing
+values in `server/.env` work with Compose. Restart the server container after
+changing them. The server marks `config.js` as non-cacheable, so browsers
+receive the new values.
 
 ## Caddy
 
