@@ -98,6 +98,12 @@ func main() {
 		)
 	}))
 	router.Use(gin.Recovery())
+	router.Use(func(c *gin.Context) {
+		if c.Request.URL.Path == "/config.js" {
+			c.Header("Cache-Control", "no-store")
+		}
+		c.Next()
+	})
 
 	// Cors
 	corsOrigins := os.Getenv("CORS_ORIGINS")

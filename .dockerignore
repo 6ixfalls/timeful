@@ -1,0 +1,17 @@
+.git
+.github
+
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.*
+!frontend/.env.template
+frontend/coverage
+
+server/vendor
+server/server
+server/.env
+server/.env.*
+!server/.env.template
+server/logs
+server/*.log

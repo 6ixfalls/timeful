@@ -30,11 +30,25 @@ sudo systemctl reload caddy
 
 ## Services
 
-| Service    | Description                             | Port           |
-| ---------- | --------------------------------------- | -------------- |
-| `postgres` | PostgreSQL 16 database                  | Internal only  |
-| `frontend` | Vue.js build (outputs to shared volume) | N/A            |
-| `server`   | Go backend                              | 127.0.0.1:3002 |
+| Service    | Description                                  | Port           |
+| ---------- | -------------------------------------------- | -------------- |
+| `postgres` | PostgreSQL 16 database                       | Internal only  |
+| `server`   | Go backend with embedded Vue frontend assets | 127.0.0.1:3002 |
+
+The application container writes `config.js` when it starts. These environment
+variables are read at container startup rather than embedded during image build:
+
+| Variable                       | Browser configuration       |
+| ------------------------------ | --------------------------- |
+| `VUE_APP_POSTHOG_API_KEY`      | PostHog project API key     |
+| `VUE_APP_GOOGLE_CLIENT_ID`     | Google OAuth client ID      |
+| `VUE_APP_MICROSOFT_CLIENT_ID`  | Microsoft OAuth client ID   |
+
+All three values are public because browsers can read them. The image also
+accepts `CLIENT_ID` and `MICROSOFT_CLIENT_ID` as fallbacks for their frontend
+counterparts, so existing values in `server/.env` work with Compose. Restart
+the server container after changing them. The server marks `config.js` as
+non-cacheable, so browsers receive the new values.
 
 ## Caddy
 
@@ -61,7 +75,7 @@ docker compose down -v            # Stop and remove volumes (deletes data!)
 
 ## Data & Backup
 
-Data is persisted in Docker volumes: `postgres_data`, `frontend_dist`, `server_logs`.
+Data is persisted in Docker volumes: `postgres_data` and `server_logs`.
 
 ```bash
 # Backup PostgreSQL
@@ -83,7 +97,6 @@ docker compose ps
 docker compose exec postgres pg_isready -U timeful -d timeful
 
 # Frontend not loading
-docker compose logs frontend
 docker compose exec server ls -la /app/frontend/dist
 ```
 
