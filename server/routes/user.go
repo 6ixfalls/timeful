@@ -130,7 +130,9 @@ func updateCalendarOptions(c *gin.Context) {
 	}
 
 	// Update database
-	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_options", authUser.CalendarOptions).Error; err != nil {
+	if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id), map[string]interface{}{
+		"calendar_options": authUser.CalendarOptions,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -267,7 +269,9 @@ func getCalendars(c *gin.Context) {
 	calendarEvents, editedCalendarAccounts := calendar.GetUsersCalendarEvents(user, accountsSet, payload.TimeMin, payload.TimeMax)
 
 	if editedCalendarAccounts {
-		if err := db.ORM().Model(&models.User{}).Where("id = ?", user.Id).Update("calendar_accounts", user.CalendarAccounts).Error; err != nil {
+		if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", user.Id), map[string]interface{}{
+			"calendar_accounts": user.CalendarAccounts,
+		}).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	}
@@ -520,7 +524,9 @@ func addCalendarAccount(c *gin.Context, args addCalendarAccountArgs) {
 	}
 	authUser.CalendarAccounts[canonicalKey] = calendarAccount
 
-	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+	if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id), map[string]interface{}{
+		"calendar_accounts": authUser.CalendarAccounts,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 }
@@ -548,7 +554,9 @@ func removeCalendarAccount(c *gin.Context) {
 	}
 
 	delete(authUser.CalendarAccounts, calendarAccountKey)
-	if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+	if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id), map[string]interface{}{
+		"calendar_accounts": authUser.CalendarAccounts,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 
@@ -583,7 +591,9 @@ func toggleCalendar(c *gin.Context) {
 		account.Enabled = payload.Enabled
 		authUser.CalendarAccounts[calendarAccountKey] = account
 
-		if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+		if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id), map[string]interface{}{
+			"calendar_accounts": authUser.CalendarAccounts,
+		}).Error; err != nil {
 			logger.StdErr.Panicln(err)
 			return
 		}
@@ -623,7 +633,9 @@ func toggleSubCalendar(c *gin.Context) {
 			(*account.SubCalendars)[payload.SubCalendarId] = subCalendar
 			authUser.CalendarAccounts[calendarAccountKey] = account
 
-			if err := db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id).Update("calendar_accounts", authUser.CalendarAccounts).Error; err != nil {
+			if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", authUser.Id), map[string]interface{}{
+				"calendar_accounts": authUser.CalendarAccounts,
+			}).Error; err != nil {
 				logger.StdErr.Panicln(err)
 				return
 			}

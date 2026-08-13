@@ -230,7 +230,9 @@ func RefreshUserTokenIfNecessary(u *models.User, accounts models.Set[string]) {
 
 	// Update user object if accounts were updated
 	if numAccountsToUpdate > 0 {
-		if err := db.ORM().Model(&models.User{}).Where("id = ?", u.Id).Update("calendar_accounts", u.CalendarAccounts).Error; err != nil {
+		if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", u.Id), map[string]interface{}{
+			"calendar_accounts": u.CalendarAccounts,
+		}).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	}

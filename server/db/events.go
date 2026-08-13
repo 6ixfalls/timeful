@@ -109,8 +109,9 @@ func UpdateGuestResponseName(eventID, oldName, newName string) {
 	if response.Response != nil {
 		response.Response.Name = newName
 	}
-	if err := orm.Model(&models.EventResponse{}).Where("id = ?", response.Id).Updates(map[string]interface{}{
-		"user_id": response.UserId, "response": response.Response,
+	if err := Updates(orm.Model(&models.EventResponse{}).Where("id = ?", response.Id), map[string]interface{}{
+		"user_id":  response.UserId,
+		"response": response.Response,
 	}).Error; err != nil {
 		panic(err)
 	}

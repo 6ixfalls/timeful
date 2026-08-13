@@ -445,7 +445,7 @@ func editEvent(c *gin.Context) {
 	}
 
 	// Update event object
-	if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+	if err := db.Updates(db.ORM().Model(&models.Event{}).Where("id = ?", event.Id), map[string]interface{}{
 		"name":                         event.Name,
 		"description":                  event.Description,
 		"duration":                     event.Duration,
@@ -935,7 +935,9 @@ func updateEventResponse(c *gin.Context) {
 		// Update event responses
 		if userHasResponded {
 			eventResponses[idx].Response = &response
-			if err := db.ORM().Model(&models.EventResponse{}).Where("id = ?", eventResponses[idx].Id).Update("response", eventResponses[idx].Response).Error; err != nil {
+			if err := db.Updates(db.ORM().Model(&models.EventResponse{}).Where("id = ?", eventResponses[idx].Id), map[string]interface{}{
+				"response": eventResponses[idx].Response,
+			}).Error; err != nil {
 				logger.StdErr.Panicln(err)
 			}
 		} else {
@@ -1065,7 +1067,7 @@ func updateEventResponse(c *gin.Context) {
 
 	// Mongo updated only sign-up responses or the response-notification flag.
 	if utils.Coalesce(event.IsSignUpForm) {
-		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+		if err := db.Updates(db.ORM().Model(&models.Event{}).Where("id = ?", event.Id), map[string]interface{}{
 			"sign_up_responses":            event.SignUpResponses,
 			"send_email_after_x_responses": event.SendEmailAfterXResponses,
 		}).Error; err != nil {
@@ -1173,7 +1175,7 @@ func deleteEventResponse(c *gin.Context) {
 	}
 
 	if utils.Coalesce(event.IsSignUpForm) {
-		if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
+		if err := db.Updates(db.ORM().Model(&models.Event{}).Where("id = ?", event.Id), map[string]interface{}{
 			"sign_up_responses":            event.SignUpResponses,
 			"send_email_after_x_responses": event.SendEmailAfterXResponses,
 		}).Error; err != nil {
@@ -1271,7 +1273,9 @@ func userResponded(c *gin.Context) {
 	}
 
 	// Update event in database
-	if err := db.ORM().Model(&models.Event{}).Where("id = ?", event.Id).Update("remindees", event.Remindees).Error; err != nil {
+	if err := db.Updates(db.ORM().Model(&models.Event{}).Where("id = ?", event.Id), map[string]interface{}{
+		"remindees": event.Remindees,
+	}).Error; err != nil {
 		logger.StdErr.Panicln(err)
 	}
 

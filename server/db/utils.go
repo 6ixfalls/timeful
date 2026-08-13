@@ -60,7 +60,9 @@ func UpdateDailyUserLog(user *models.User) {
 		}
 	}
 	log.UserIds = append(log.UserIds, user.Id)
-	if err := orm.Model(&models.DailyUserLog{}).Where("id = ?", log.Id).Update("user_ids", log.UserIds).Error; err != nil {
+	if err := Updates(orm.Model(&models.DailyUserLog{}).Where("id = ?", log.Id), map[string]interface{}{
+		"user_ids": log.UserIds,
+	}).Error; err != nil {
 		panic(err)
 	}
 }

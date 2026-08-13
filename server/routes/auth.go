@@ -279,7 +279,7 @@ func signInHelper(c *gin.Context, token auth.TokenResponse, tokenOrigin models.T
 		if userData.LastName != "" {
 			updates["last_name"] = userData.LastName
 		}
-		if err := db.ORM().Model(&models.User{}).Where("id = ?", userId).Updates(updates).Error; err != nil {
+		if err := db.Updates(db.ORM().Model(&models.User{}).Where("id = ?", userId), updates).Error; err != nil {
 			logger.StdErr.Panicln(err)
 		}
 	}
